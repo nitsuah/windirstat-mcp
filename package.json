@@ -1,0 +1,22 @@
+{
+  "name": "windirstat-mcp",
+  "version": "1.0.0",
+  "description": "Model Context Protocol (MCP) Server for Windows Disk Analyzer, Tiering, and Safe Cleanup",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.6.0"
+  },
+  "keywords": [
+    "mcp",
+    "disk-analyzer",
+    "windirstat",
+    "storage",
+    "cleanup"
+  ],
+  "author": "Antigravity AI",
+  "license": "MIT"
+}
