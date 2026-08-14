@@ -18,8 +18,14 @@ const PROTECTED_KEYWORDS = [
 ];
 
 function isProtected(targetPath) {
-  const lower = targetPath.toLowerCase();
-  return PROTECTED_KEYWORDS.some(kw => lower.includes(kw));
+  try {
+    const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
+    return PROTECTED_KEYWORDS.some(kw => resolvedPath.includes(kw.toLowerCase()));
+  } catch (e) {
+    // If path doesn't exist, fall back to basic check
+    const lower = targetPath.toLowerCase();
+    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw));
+  }
 }
 
 function getFolderSize(dirPath, currentDepth = 0, maxDepth = 3) {
