@@ -14,7 +14,10 @@ const PROTECTED_KEYWORDS = [
   'windows',
   'program files',
   'boot',
-  '.git'
+  '.git',
+  'node_modules',
+  '.vscode',
+  '.idea'
 ];
 
 function isProtected(targetPath) {
