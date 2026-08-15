@@ -347,7 +347,19 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             continue;
           }
 
-          if (fs.realpathSync(deletePath) !== deletePath) {
+          let revalidatedPath;
+          try {
+            revalidatedPath = fs.realpathSync(requestedPath);
+          } catch (err) {
+            if (err.code === 'ENOENT') {
+              results.push({ path: targetPath, status: 'NOT_FOUND', freedMB: 0 });
+              continue;
+            }
+
+            throw err;
+          }
+
+          if (revalidatedPath.toLowerCase() !== deletePath.toLowerCase()) {
             throw new Error('Target changed during validation');
           }
 
