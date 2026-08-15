@@ -119,7 +119,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
       },
       {
         name: 'clean_safe_targets',
-        description: 'Safely delete specified temporary cache folders or files with built-in protection guards.',
+        description: 'Safely delete specified temporary cache folders or files with built-in protection guards. Use reportOnly: true to simulate without deleting.',
         inputSchema: {
           type: 'object',
           properties: {
@@ -128,7 +128,8 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
               items: { type: 'string' },
               description: 'Array of absolute file or directory paths to clean'
             },
-            confirmAction: { type: 'boolean', description: 'Must be true to execute deletion' }
+            confirmAction: { type: 'boolean', description: 'Must be true to execute deletion' },
+            reportOnly: { type: 'boolean', description: 'If true, only report what would be deleted without performing deletion' }
           },
           required: ['targets', 'confirmAction']
         }
@@ -313,7 +314,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
     }
 
     if (name === 'clean_safe_targets') {
-      const { targets, confirmAction } = args;
+      const { targets, confirmAction, reportOnly } = args;
 
       if (!confirmAction) {
         return { content: [{ type: 'text', text: 'Error: confirmAction must be true to proceed with deletion.' }] };
@@ -331,8 +332,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             deletePath = fs.realpathSync(requestedPath);
           } catch (err) {
             if (err.code === 'ENOENT') {
-              if (isProtected(targetPath)) {
-                results.push({ path: targetPath, status: 'SKIPPED_PROTECTED', freedMB: 0 });
+              if (isProtected(requestedPath)) {
+                results.push({ path: targetPath, status: reportOnly ? 'WOULD_SKIP_PROTECTED' : 'SKIPPED_PROTECTED', freedMB: 0 });
               } else {
                 results.push({ path: targetPath, status: 'NOT_FOUND', freedMB: 0 });
               }
@@ -343,7 +344,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
 
           if (isProtected(deletePath)) {
-            results.push({ path: targetPath, status: 'SKIPPED_PROTECTED', freedMB: 0 });
+            results.push({ path: targetPath, status: reportOnly ? 'WOULD_SKIP_PROTECTED' : 'SKIPPED_PROTECTED', freedMB: 0 });
             continue;
           }
 
@@ -368,16 +369,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
           if (stats.isDirectory()) {
             sizeBytes = getFolderSize(deletePath, 0, 5).totalSize;
-            fs.rmSync(deletePath, { recursive: true, force: true });
+            if (!reportOnly) {
+              fs.rmSync(deletePath, { recursive: true, force: true });
+            }
           } else {
             sizeBytes = stats.size;
-            fs.unlinkSync(deletePath);
+            if (!reportOnly) {
+              fs.unlinkSync(deletePath);
+            }
           }
 
           totalFreedBytes += sizeBytes;
           results.push({
             path: targetPath,
-            status: 'DELETED_SUCCESSFULLY',
+            status: reportOnly ? 'WOULD_DELETE' : 'DELETED_SUCCESSFULLY',
             freedMB: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
             freedGB: Number((sizeBytes / (1024 * 1024 * 1024)).toFixed(2))
           });
@@ -391,7 +396,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       return {
         content: [{
           type: 'text',
-          text: JSON.stringify({ totalFreedGB, details: results }, null, 2)
+          text: JSON.stringify({ totalFreedGB, details: results, mode: reportOnly ? 'REPORT_ONLY' : 'EXECUTE' }, null, 2)
         }]
       };
     }
