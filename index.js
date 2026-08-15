@@ -18,8 +18,18 @@ const PROTECTED_KEYWORDS = [
 ];
 
 function isProtected(targetPath) {
-  const lower = targetPath.toLowerCase();
-  return PROTECTED_KEYWORDS.some(kw => lower.includes(kw));
+  try {
+    const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
+    return PROTECTED_KEYWORDS.some(kw => resolvedPath.includes(kw.toLowerCase()));
+  } catch (e) {
+    if (e.code !== 'ENOENT') {
+      return true;
+    }
+
+    // If path doesn't exist, fall back to basic check
+    const lower = targetPath.toLowerCase();
+    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+  }
 }
 
 function getFolderSize(dirPath, currentDepth = 0, maxDepth = 3) {
@@ -314,29 +324,42 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let totalFreedBytes = 0;
 
       for (const targetPath of targets) {
-        if (isProtected(targetPath)) {
-          results.push({ path: targetPath, status: reportOnly ? 'WOULD_SKIP_PROTECTED' : 'SKIPPED_PROTECTED', freedMB: 0 });
-          continue;
-        }
-
-        if (!fs.existsSync(targetPath)) {
-          results.push({ path: targetPath, status: 'NOT_FOUND', freedMB: 0 });
-          continue;
-        }
-
         try {
-          const stats = fs.statSync(targetPath);
+          const requestedPath = path.resolve(targetPath);
+          let deletePath = requestedPath;
+
+          try {
+            deletePath = fs.realpathSync(requestedPath);
+          } catch (err) {
+            if (err.code === 'ENOENT') {
+              if (isProtected(targetPath)) {
+                results.push({ path: targetPath, status: reportOnly ? 'WOULD_SKIP_PROTECTED' : 'SKIPPED_PROTECTED', freedMB: 0 });
+              } else {
+                results.push({ path: targetPath, status: 'NOT_FOUND', freedMB: 0 });
+              }
+              continue;
+            }
+
+            throw err;
+          }
+
+          if (isProtected(deletePath)) {
+            results.push({ path: targetPath, status: reportOnly ? 'WOULD_SKIP_PROTECTED' : 'SKIPPED_PROTECTED', freedMB: 0 });
+            continue;
+          }
+
+          const stats = fs.statSync(deletePath);
           let sizeBytes = 0;
 
           if (stats.isDirectory()) {
-            sizeBytes = getFolderSize(targetPath, 0, 5).totalSize;
+            sizeBytes = getFolderSize(deletePath, 0, 5).totalSize;
             if (!reportOnly) {
-              fs.rmSync(targetPath, { recursive: true, force: true });
+              fs.rmSync(deletePath, { recursive: true, force: true });
             }
           } else {
             sizeBytes = stats.size;
             if (!reportOnly) {
-              fs.unlinkSync(targetPath);
+              fs.unlinkSync(deletePath);
             }
           }
 
