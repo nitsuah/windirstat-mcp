@@ -23,8 +23,11 @@ export function isProtected(targetPath) {
     return PROTECTED_KEYWORDS.some(kw => resolvedPath.includes(kw.toLowerCase()));
   } catch (e) {
     // If path doesn't exist, fall back to basic check
+    if (e?.code !== 'ENOENT' && e?.code !== 'ENOTDIR') {
+      return true;
+    }
     const lower = targetPath.toLowerCase();
-    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw));
+    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
   }
 }
 
