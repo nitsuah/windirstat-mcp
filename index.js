@@ -14,7 +14,10 @@ const PROTECTED_KEYWORDS = [
   'windows',
   'program files',
   'boot',
-  '.git'
+  '.git',
+  'node_modules',
+  '.vscode',
+  '.idea'
 ];
 
 function isProtected(targetPath) {
@@ -69,7 +72,7 @@ function getFolderSize(dirPath, currentDepth = 0, maxDepth = 3) {
 const server = new Server(
   {
     name: 'windirstat-mcp',
-    version: '1.0.0',
+    version: '1.0.1',
   },
   {
     capabilities: {
