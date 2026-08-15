@@ -22,9 +22,13 @@ function isProtected(targetPath) {
     const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
     return PROTECTED_KEYWORDS.some(kw => resolvedPath.includes(kw.toLowerCase()));
   } catch (e) {
+    if (e.code !== 'ENOENT') {
+      return true;
+    }
+
     // If path doesn't exist, fall back to basic check
     const lower = targetPath.toLowerCase();
-    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw));
+    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
   }
 }
 
@@ -319,26 +323,43 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       let totalFreedBytes = 0;
 
       for (const targetPath of targets) {
-        if (isProtected(targetPath)) {
-          results.push({ path: targetPath, status: 'SKIPPED_PROTECTED', freedMB: 0 });
-          continue;
-        }
-
-        if (!fs.existsSync(targetPath)) {
-          results.push({ path: targetPath, status: 'NOT_FOUND', freedMB: 0 });
-          continue;
-        }
-
         try {
-          const stats = fs.statSync(targetPath);
+          const requestedPath = path.resolve(targetPath);
+          let deletePath = requestedPath;
+
+          try {
+            deletePath = fs.realpathSync(requestedPath);
+          } catch (err) {
+            if (err.code === 'ENOENT') {
+              if (isProtected(targetPath)) {
+                results.push({ path: targetPath, status: 'SKIPPED_PROTECTED', freedMB: 0 });
+              } else {
+                results.push({ path: targetPath, status: 'NOT_FOUND', freedMB: 0 });
+              }
+              continue;
+            }
+
+            throw err;
+          }
+
+          if (isProtected(deletePath)) {
+            results.push({ path: targetPath, status: 'SKIPPED_PROTECTED', freedMB: 0 });
+            continue;
+          }
+
+          if (fs.realpathSync(deletePath) !== deletePath) {
+            throw new Error('Target changed during validation');
+          }
+
+          const stats = fs.statSync(deletePath);
           let sizeBytes = 0;
 
           if (stats.isDirectory()) {
-            sizeBytes = getFolderSize(targetPath, 0, 5).totalSize;
-            fs.rmSync(targetPath, { recursive: true, force: true });
+            sizeBytes = getFolderSize(deletePath, 0, 5).totalSize;
+            fs.rmSync(deletePath, { recursive: true, force: true });
           } else {
             sizeBytes = stats.size;
-            fs.unlinkSync(targetPath);
+            fs.unlinkSync(deletePath);
           }
 
           totalFreedBytes += sizeBytes;
