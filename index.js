@@ -17,7 +17,7 @@ const PROTECTED_KEYWORDS = [
   '.git'
 ];
 
-function isProtected(targetPath) {
+export function isProtected(targetPath) {
   const lower = targetPath.toLowerCase();
   return PROTECTED_KEYWORDS.some(kw => lower.includes(kw));
 }
@@ -78,10 +78,49 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
           type: 'object',
           properties: {
             path: { type: 'string', description: 'Absolute directory path to scan' },
-            maxDepth: { type: 'number', description: 'Depth to recurse (default 2)' },
+            maxDepth: { type: 'number', description: 'Depth to recurse (default 5)' },
             minSizeMB: { type: 'number', description: 'Minimum size threshold in MB (default 50)' }
           },
           required: ['path']
+        }
+      },
+      {
+        name: 'list_potential_apps',
+        description: 'Scan common application directories to identify potentially uninstallable software.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scanPaths: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of paths to scan (defaults to Program Files and AppData)'
+            }
+          }
+        }
+      },
+      {
+        name: 'get_cleanup_recommendations',
+        description: 'Aggregate cleanup recommendations (apps to uninstall, large media files).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scanPath: { type: 'string', description: 'Base path to scan' }
+          },
+          required: ['scanPath']
+        }
+      },
+      {
+        name: 'list_potential_apps',
+        description: 'Scan common application directories to identify potentially uninstallable software.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            scanPaths: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Array of paths to scan (defaults to Program Files and AppData)'
+            }
+          }
         }
       },
       {
@@ -134,7 +173,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   try {
     if (name === 'scan_directory') {
       const dirPath = args.path;
-      const maxDepth = args.maxDepth || 2;
+      const maxDepth = args.maxDepth || 5;
       const minSizeMB = args.minSizeMB || 50;
 
       if (!fs.existsSync(dirPath)) {
@@ -188,6 +227,72 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           text: JSON.stringify({ target: dirPath, count: results.length, items: results }, null, 2)
         }]
       };
+    }
+
+    if (name === 'list_potential_apps') {
+      const scanPaths = args.scanPaths || [
+        process.env.PROGRAMFILES || 'C:\\Program Files',
+        process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)',
+        process.env.LOCALAPPDATA || 'C:\\Users\\User\\AppData\\Local'
+      ];
+      const results = [];
+      for (const p of scanPaths) {
+        if (fs.existsSync(p)) {
+          const items = fs.readdirSync(p, { withFileTypes: true });
+          for (const item of items.filter(i => i.isDirectory())) {
+            const fullPath = path.join(p, item.name);
+            const size = getFolderSize(fullPath, 0, 1).totalSize;
+            results.push({ name: item.name, path: fullPath, sizeMB: Number((size / (1024 * 1024)).toFixed(2)) });
+          }
+        }
+      }
+      return { content: [{ type: 'text', text: JSON.stringify(results.sort((a, b) => b.sizeMB - a.sizeMB), null, 2) }] };
+    }
+
+    if (name === 'get_cleanup_recommendations') {
+      const scanPath = args.scanPath;
+      const apps = await (async () => {
+        const scanPaths = [
+          process.env.PROGRAMFILES || 'C:\\Program Files',
+          process.env['PROGRAMFILES(X86)'] || 'C:\\Program Files (x86)',
+        ];
+        const results = [];
+        for (const p of scanPaths) {
+          if (fs.existsSync(p)) {
+            const items = fs.readdirSync(p, { withFileTypes: true });
+            for (const item of items.filter(i => i.isDirectory())) {
+              const fullPath = path.join(p, item.name);
+              const size = getFolderSize(fullPath, 0, 1).totalSize;
+              results.push({ name: item.name, path: fullPath, sizeMB: Number((size / (1024 * 1024)).toFixed(2)) });
+            }
+          }
+        }
+        return results.sort((a, b) => b.sizeMB - a.sizeMB).slice(0, 10);
+      })();
+
+      const media = await (async () => {
+        const results = [];
+        function scanLargeMedia(dir) {
+          try {
+            const items = fs.readdirSync(dir, { withFileTypes: true });
+            for (const item of items) {
+              const fullPath = path.join(dir, item.name);
+              if (item.isDirectory()) scanLargeMedia(fullPath);
+              else if (/\.(mp4|mkv|mov|png|jpg|jpeg)$/i.test(item.name)) {
+                try {
+                  const stats = fs.statSync(fullPath);
+                  if (stats.size > 100 * 1024 * 1024)
+                    results.push({ name: item.name, path: fullPath, sizeMB: Number((stats.size / (1024 * 1024)).toFixed(2)) });
+                } catch(e){}
+              }
+            }
+          } catch(e){}
+        }
+        scanLargeMedia(scanPath);
+        return results.sort((a, b) => b.sizeMB - a.sizeMB).slice(0, 10);
+      })();
+
+      return { content: [{ type: 'text', text: JSON.stringify({ recommendedApps: apps, largeMediaFiles: media }, null, 2) }] };
     }
 
     if (name === 'get_largest_items') {
