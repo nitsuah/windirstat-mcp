@@ -21,17 +21,35 @@ const PROTECTED_KEYWORDS = [
 ];
 
 function isProtected(targetPath) {
+  // Split a normalized path string into its individual components
+  function pathComponents(p) {
+    return p.split(/[\\/]/).filter(Boolean);
+  }
+
+  function matchesKeyword(p) {
+    const lower = p.toLowerCase();
+    const components = pathComponents(lower);
+    return PROTECTED_KEYWORDS.some(kw => {
+      const kwLower = kw.toLowerCase();
+      // Multi-segment keywords (contain path separator or space) use substring match
+      if (/[\\/\s]/.test(kwLower)) {
+        return lower.includes(kwLower);
+      }
+      // Single-component keywords must match an exact path segment
+      return components.includes(kwLower);
+    });
+  }
+
   try {
     const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
-    return PROTECTED_KEYWORDS.some(kw => resolvedPath.includes(kw.toLowerCase()));
+    return matchesKeyword(resolvedPath);
   } catch (e) {
     if (e.code !== 'ENOENT') {
       return true;
     }
 
-    // If path doesn't exist, fall back to basic check
-    const lower = targetPath.toLowerCase();
-    return PROTECTED_KEYWORDS.some(kw => lower.includes(kw.toLowerCase()));
+    // If path doesn't exist, fall back to basic check on normalized path
+    return matchesKeyword(path.resolve(targetPath));
   }
 }
 
