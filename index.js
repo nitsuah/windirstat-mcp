@@ -406,6 +406,84 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       };
     }
 
+    if (name === 'visualize_directory') {
+      const dirPath = args.path;
+      const maxDepth = args.maxDepth || 3;
+      const width = args.width || 80;
+      const minSizeMB = args.minSizeMB || 10;
+
+      if (!fs.existsSync(dirPath)) {
+        return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
+      }
+
+      const items = fs.readdirSync(dirPath, { withFileTypes: true });
+      const results = [];
+
+      for (const item of items) {
+        const fullPath = path.join(dirPath, item.name);
+        let sizeBytes = 0;
+        let fileCount = 0;
+
+        if (item.isDirectory()) {
+          const res = getFolderSize(fullPath, 0, maxDepth);
+          sizeBytes = res.totalSize;
+          fileCount = res.fileCount;
+        } else if (item.isFile()) {
+          try {
+            const stats = fs.statSync(fullPath);
+            sizeBytes = stats.size;
+            fileCount = 1;
+          } catch (e) {}
+        }
+
+        const sizeMB = Number((sizeBytes / (1024 * 1024)).toFixed(2));
+
+        if (sizeMB >= minSizeMB) {
+          results.push({
+            name: item.name,
+            path: fullPath,
+            sizeMB,
+            sizeBytes,
+            fileCount,
+            isDir: item.isDirectory()
+          });
+        }
+      }
+
+      results.sort((a, b) => b.sizeBytes - a.sizeBytes);
+
+      const totalSize = results.reduce((sum, r) => sum + r.sizeBytes, 0);
+      const visualWidth = Math.max(20, width - 15);
+
+      let output = `\n┌─ ${path.basename(dirPath)} ─┐\n`;
+      output += `│ Total: ${Number((totalSize / (1024 * 1024)).toFixed(1))} MB (${results.length} items) │\n`;
+      output += `├${'─'.repeat(visualWidth + 12)}┤\n`;
+
+      for (const item of results.slice(0, 20)) {
+        const pct = totalSize > 0 ? Math.round((item.sizeBytes / totalSize) * 100) : 0;
+        const barLen = Math.max(1, Math.round((item.sizeBytes / totalSize) * visualWidth));
+        const bar = '█'.repeat(barLen);
+        const sizeStr = item.sizeMB >= 1024
+          ? `${Number((item.sizeMB / 1024).toFixed(1))} GB`
+          : `${item.sizeMB} MB`;
+        const typeIcon = item.isDir ? '📁' : '📄';
+        output += `│ ${typeIcon} ${item.name.padEnd(30).slice(0, 30)} ${bar.padEnd(visualWidth)} ${sizeStr.padStart(10)} ${pct.toString().padStart(3)}% │\n`;
+      }
+
+      if (results.length > 20) {
+        output += `│ ... and ${results.length - 20} more items                              │\n`;
+      }
+
+      output += `└${'─'.repeat(visualWidth + 12)}┘\n`;
+
+      return {
+        content: [{
+          type: 'text',
+          text: output
+        }]
+      };
+    }
+
     throw new Error(`Unknown tool: ${name}`);
   } catch (error) {
     return {
