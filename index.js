@@ -3,9 +3,22 @@ import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
 import fs from 'fs';
 import path from 'path';
+import { fileURLToPath } from 'url';
 
-// Define Protected Paths to guarantee safety
-const PROTECTED_KEYWORDS = [
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+// Load configuration
+function loadConfig() {
+  const configPath = path.join(__dirname, 'config.default.json');
+  if (fs.existsSync(configPath)) {
+    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  }
+  return {};
+}
+
+const config = loadConfig();
+const PROTECTED_KEYWORDS = config.protectedKeywords || [
   'code project',
   'freelance',
   'downloads\\apk',
@@ -19,6 +32,61 @@ const PROTECTED_KEYWORDS = [
   '.vscode',
   '.idea'
 ];
+
+const WINDOWS_SYSTEM_PATHS = config.windowsSystemPaths || [
+  'C:\\Windows',
+  'C:\\Program Files',
+  'C:\\Program Files (x86)',
+  'C:\\ProgramData',
+  'C:\\$Recycle.Bin',
+  'C:\\System Volume Information',
+  'C:\\Recovery',
+  'C:\\PerfLogs'
+];
+
+const TIER1_KEYWORDS = config.tier1Keywords || [
+  'temp',
+  'cache',
+  'crashdump',
+  'updater',
+  '.tmp',
+  '.log'
+];
+
+const TIER2_KEYWORDS = config.tier2Keywords || [
+  'download',
+  '.zip',
+  '.rar',
+  '.exe',
+  '.msi',
+  '.xapk',
+  '.iso'
+];
+
+const WINDOWS_TEMP_PATHS = config.windowsTempPaths || [
+  '%TEMP%',
+  '%TMP%',
+  '%USERPROFILE%\\AppData\\Local\\Temp',
+  '%USERPROFILE%\\AppData\\Local\\Microsoft\\Windows\\INetCache',
+  '%USERPROFILE%\\AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files',
+  '%SYSTEMROOT%\\Temp',
+  '%SYSTEMROOT%\\Prefetch',
+  'C:\\Windows\\Temp',
+  'C:\\Windows\\Prefetch'
+];
+
+// Expand Windows environment variables
+function expandWindowsEnvVars(p) {
+  return p
+    .replace(/%TEMP%/gi, process.env.TEMP || '')
+    .replace(/%TMP%/gi, process.env.TMP || '')
+    .replace(/%USERPROFILE%/gi, process.env.USERPROFILE || '')
+    .replace(/%SYSTEMROOT%/gi, process.env.SYSTEMROOT || 'C:\\Windows');
+}
+
+function getExpandedWindowsTempPaths() {
+  return WINDOWS_TEMP_PATHS.map(expandWindowsEnvVars).filter(Boolean);
+}
 
 function isProtected(targetPath) {
   // Split a normalized path string into its individual components
@@ -40,8 +108,37 @@ function isProtected(targetPath) {
     });
   }
 
+  // Check if path is a Windows system path
+  function isWindowsSystemPath(p) {
+    const lower = p.toLowerCase();
+    return WINDOWS_SYSTEM_PATHS.some(sysPath => {
+      const sysLower = sysPath.toLowerCase();
+      return lower === sysLower || lower.startsWith(sysLower + '\\') || lower.startsWith(sysLower + '/');
+    });
+  }
+
+  // Check if path is in Windows temp paths
+  function isWindowsTempPath(p) {
+    const lower = p.toLowerCase();
+    return getExpandedWindowsTempPaths().some(tempPath => {
+      const tempLower = tempPath.toLowerCase();
+      return lower === tempLower || lower.startsWith(tempLower + '\\') || lower.startsWith(tempLower + '/');
+    });
+  }
+
   try {
     const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
+
+    // Check Windows system paths first (highest protection)
+    if (isWindowsSystemPath(resolvedPath)) {
+      return true;
+    }
+
+    // Check Windows temp paths (lowest protection - safe to clean)
+    if (isWindowsTempPath(resolvedPath)) {
+      return false; // Explicitly NOT protected - these are safe temp paths
+    }
+
     return matchesKeyword(resolvedPath);
   } catch (e) {
     if (e.code !== 'ENOENT') {
@@ -49,7 +146,17 @@ function isProtected(targetPath) {
     }
 
     // If path doesn't exist, fall back to basic check on normalized path
-    return matchesKeyword(path.resolve(targetPath));
+    const normalizedPath = path.resolve(targetPath).toLowerCase();
+
+    if (isWindowsSystemPath(normalizedPath)) {
+      return true;
+    }
+
+    if (isWindowsTempPath(normalizedPath)) {
+      return false;
+    }
+
+    return matchesKeyword(normalizedPath);
   }
 }
 
@@ -153,6 +260,20 @@ server.setRequestHandler(ListToolsRequestSchema, async () => {
             reportOnly: { type: 'boolean', description: 'If true, only report what would be deleted without performing deletion' }
           },
           required: ['targets', 'confirmAction']
+        }
+      },
+      {
+        name: 'visualize_directory',
+        description: 'Generate ASCII treemap visualization of directory sizes (WinDirStat-style 2D treemap in terminal).',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: { type: 'string', description: 'Absolute directory path to visualize' },
+            maxDepth: { type: 'number', description: 'Depth to recurse (default 3)' },
+            width: { type: 'number', description: 'Terminal width for visualization (default 80)' },
+            minSizeMB: { type: 'number', description: 'Minimum size in MB to display (default 10)' }
+          },
+          required: ['path']
         }
       }
     ]

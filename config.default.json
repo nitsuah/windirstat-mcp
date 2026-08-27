@@ -1,0 +1,62 @@
+{
+  "protectedKeywords": [
+    "code project",
+    "freelance",
+    "downloads\\apk",
+    "documents\\backup",
+    "system32",
+    "windows",
+    "program files",
+    "boot",
+    ".git",
+    "node_modules",
+    ".vscode",
+    ".idea"
+  ],
+  "windowsSystemPaths": [
+    "C:\\Windows",
+    "C:\\Program Files",
+    "C:\\Program Files (x86)",
+    "C:\\ProgramData",
+    "C:\\$Recycle.Bin",
+    "C:\\System Volume Information",
+    "C:\\Recovery",
+    "C:\\PerfLogs"
+  ],
+  "tier1Keywords": [
+    "temp",
+    "cache",
+    "crashdump",
+    "updater",
+    ".tmp",
+    ".log"
+  ],
+  "tier2Keywords": [
+    "download",
+    ".zip",
+    ".rar",
+    ".exe",
+    ".msi",
+    ".xapk",
+    ".iso"
+  ],
+  "windowsTempPaths": [
+    "%TEMP%",
+    "%TMP%",
+    "%USERPROFILE%\\AppData\\Local\\Temp",
+    "%USERPROFILE%\\AppData\\Local\\Microsoft\\Windows\\INetCache",
+    "%USERPROFILE%\\AppData\\Local\\Microsoft\\Windows\\Temporary Internet Files",
+    "%SYSTEMROOT%\\Temp",
+    "%SYSTEMROOT%\\Prefetch",
+    "C:\\Windows\\Temp",
+    "C:\\Windows\\Prefetch"
+  ],
+  "visualization": {
+    "defaultWidth": 80,
+    "defaultMaxDepth": 3,
+    "defaultMinSizeMB": 10,
+    "barChar": "█",
+    "showPercentages": true,
+    "showFileCounts": false
+  }
+}
