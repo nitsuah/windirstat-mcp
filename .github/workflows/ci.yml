@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, feat/**]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run tests
+        run: npm run test:coverage
+
+      - name: Upload coverage
+        uses: codecov/codecov-action@b9fd7d16f6d7d1b5d2bec1a2887e65ceed900238 # v4
+        if: always()
+        with:
+          files: ./coverage/lcov.info
+          fail_ci_if_error: false
+
+  docker:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Build Docker image
+        run: docker build -t windirstat-mcp .
+
+      - name: Test Docker image
+        run: |
+          set -o pipefail
+          # The server reads from stdin and exits cleanly once it hits EOF
+          # (docker run without -i closes stdin immediately), so this
+          # naturally terminates. Bound it with `timeout` as a safety net
+          # against any future change that makes it hang, and fail the job
+          # if the process exits non-zero or never logs its startup message.
+          output=$(timeout 15s docker run --rm windirstat-mcp 2>&1)
+          status=$?
+          echo "$output"
+          if [ "$status" -ne 0 ]; then
+            echo "Docker smoke test failed: container exited with status $status"
+            exit 1
+          fi
+          if ! echo "$output" | grep -q "WinDirStat MCP Server running on stdio"; then
+            echo "Docker smoke test failed: expected startup message not found in output"
+            exit 1
+          fi

@@ -5,10 +5,17 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.6.0"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.1",
+    "@vitest/coverage-v8": "^2.1.1"
   },
   "keywords": [
     "mcp",
