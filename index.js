@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { matchesKeyword, getFolderSize, categorizeItem } from './lib/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,25 +90,6 @@ function getExpandedWindowsTempPaths() {
 }
 
 function isProtected(targetPath) {
-  // Split a normalized path string into its individual components
-  function pathComponents(p) {
-    return p.split(/[\\/]/).filter(Boolean);
-  }
-
-  function matchesKeyword(p) {
-    const lower = p.toLowerCase();
-    const components = pathComponents(lower);
-    return PROTECTED_KEYWORDS.some(kw => {
-      const kwLower = kw.toLowerCase();
-      // Multi-segment keywords (contain path separator or space) use substring match
-      if (/[\\/\s]/.test(kwLower)) {
-        return lower.includes(kwLower);
-      }
-      // Single-component keywords must match an exact path segment
-      return components.includes(kwLower);
-    });
-  }
-
   // Check if path is a Windows system path
   function isWindowsSystemPath(p) {
     const lower = p.toLowerCase();
@@ -129,17 +111,20 @@ function isProtected(targetPath) {
   try {
     const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
 
-    // Check Windows system paths first (highest protection)
-    if (isWindowsSystemPath(resolvedPath)) {
-      return true;
-    }
-
-    // Check Windows temp paths (lowest protection - safe to clean)
+    // Check Windows temp paths first (lowest protection - safe to clean).
+    // These must be checked before the broader system-path check, since
+    // configured temp paths like C:\Windows\Temp are descendants of
+    // C:\Windows and would otherwise always be caught by it first.
     if (isWindowsTempPath(resolvedPath)) {
       return false; // Explicitly NOT protected - these are safe temp paths
     }
 
-    return matchesKeyword(resolvedPath);
+    // Check Windows system paths (highest protection)
+    if (isWindowsSystemPath(resolvedPath)) {
+      return true;
+    }
+
+    return matchesKeyword(resolvedPath, PROTECTED_KEYWORDS);
   } catch (e) {
     if (e.code !== 'ENOENT') {
       return true;
@@ -148,50 +133,16 @@ function isProtected(targetPath) {
     // If path doesn't exist, fall back to basic check on normalized path
     const normalizedPath = path.resolve(targetPath).toLowerCase();
 
-    if (isWindowsSystemPath(normalizedPath)) {
-      return true;
-    }
-
     if (isWindowsTempPath(normalizedPath)) {
       return false;
     }
 
-    return matchesKeyword(normalizedPath);
-  }
-}
-
-function getFolderSize(dirPath, currentDepth = 0, maxDepth = 3) {
-  let totalSize = 0;
-  let fileCount = 0;
-  let lastModified = new Date(0);
-
-  try {
-    const items = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const item of items) {
-      const fullPath = path.join(dirPath, item.name);
-      try {
-        if (item.isDirectory()) {
-          if (currentDepth < maxDepth) {
-            const sub = getFolderSize(fullPath, currentDepth + 1, maxDepth);
-            totalSize += sub.totalSize;
-            fileCount += sub.fileCount;
-            if (sub.lastModified > lastModified) lastModified = sub.lastModified;
-          }
-        } else if (item.isFile()) {
-          const stats = fs.statSync(fullPath);
-          totalSize += stats.size;
-          fileCount++;
-          if (stats.mtime > lastModified) lastModified = stats.mtime;
-        }
-      } catch (e) {
-        // Silently skip locked files
-      }
+    if (isWindowsSystemPath(normalizedPath)) {
+      return true;
     }
-  } catch (e) {
-    // Silently skip inaccessible dirs
-  }
 
-  return { totalSize, fileCount, lastModified };
+    return matchesKeyword(normalizedPath, PROTECTED_KEYWORDS);
+  }
 }
 
 const server = new Server(
@@ -405,7 +356,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       for (const item of items) {
         const fullPath = path.join(dirPath, item.name);
-        const lowerName = item.name.toLowerCase();
         let sizeBytes = 0;
 
         if (item.isDirectory()) {
@@ -423,27 +373,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (isProtected(fullPath)) {
           tier3.push({ ...info, reason: 'Protected Code/Project/System Data' });
-        } else if (
-          lowerName.includes('temp') ||
-          lowerName.includes('cache') ||
-          lowerName.includes('crashdump') ||
-          lowerName.includes('updater') ||
-          lowerName.endsWith('.tmp') ||
-          lowerName.endsWith('.log')
-        ) {
-          tier1.push({ ...info, reason: '100% Safe Cache / Temporary Files' });
-        } else if (
-          lowerName.includes('download') ||
-          lowerName.endsWith('.zip') ||
-          lowerName.endsWith('.rar') ||
-          lowerName.endsWith('.exe') ||
-          lowerName.endsWith('.msi') ||
-          lowerName.endsWith('.xapk') ||
-          lowerName.endsWith('.iso')
-        ) {
-          tier2.push({ ...info, reason: 'Reviewable Media / Downloads / Installers' });
         } else {
-          tier2.push({ ...info, reason: 'User Data / Unclassified' });
+          const { tier, reason } = categorizeItem(item.name, TIER1_KEYWORDS, TIER2_KEYWORDS);
+          if (tier === 1) {
+            tier1.push({ ...info, reason });
+          } else {
+            tier2.push({ ...info, reason });
+          }
         }
       }
 
@@ -529,9 +465,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'visualize_directory') {
       const dirPath = args.path;
-      const maxDepth = args.maxDepth ?? 3;
-      const width = args.width ?? 80;
-      const minSizeMB = args.minSizeMB ?? 10;
+      const visualization = config.visualization ?? {};
+      const maxDepth = args.maxDepth ?? visualization.defaultMaxDepth ?? 3;
+      const width = args.width ?? visualization.defaultWidth ?? 80;
+      const minSizeMB = args.minSizeMB ?? visualization.defaultMinSizeMB ?? 10;
 
       if (!Number.isFinite(maxDepth) || maxDepth < 0 || maxDepth > 20) {
         return { content: [{ type: 'text', text: 'Error: maxDepth must be a finite number between 0 and 20.' }] };
