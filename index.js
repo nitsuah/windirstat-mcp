@@ -529,16 +529,36 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'visualize_directory') {
       const dirPath = args.path;
-      const maxDepth = args.maxDepth || 3;
-      const width = args.width || 80;
-      const minSizeMB = args.minSizeMB || 10;
+      const maxDepth = args.maxDepth ?? 3;
+      const width = args.width ?? 80;
+      const minSizeMB = args.minSizeMB ?? 10;
+
+      if (!Number.isFinite(maxDepth) || maxDepth < 0 || maxDepth > 20) {
+        return { content: [{ type: 'text', text: 'Error: maxDepth must be a finite number between 0 and 20.' }] };
+      }
+      if (!Number.isFinite(width) || width < 40 || width > 300) {
+        return { content: [{ type: 'text', text: 'Error: width must be a finite number between 40 and 300.' }] };
+      }
+      if (!Number.isFinite(minSizeMB) || minSizeMB < 0) {
+        return { content: [{ type: 'text', text: 'Error: minSizeMB must be a finite number >= 0.' }] };
+      }
 
       if (!fs.existsSync(dirPath)) {
         return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
       }
+      if (!fs.statSync(dirPath).isDirectory()) {
+        return { content: [{ type: 'text', text: `Not a directory: ${dirPath}` }] };
+      }
 
-      const items = fs.readdirSync(dirPath, { withFileTypes: true });
+      let items;
+      try {
+        items = fs.readdirSync(dirPath, { withFileTypes: true });
+      } catch (e) {
+        return { content: [{ type: 'text', text: `Error reading directory: ${e.message}` }] };
+      }
+
       const results = [];
+      const minSizeBytes = minSizeMB * 1024 * 1024;
 
       for (const item of items) {
         const fullPath = path.join(dirPath, item.name);
@@ -557,13 +577,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           } catch (e) {}
         }
 
-        const sizeMB = Number((sizeBytes / (1024 * 1024)).toFixed(2));
-
-        if (sizeMB >= minSizeMB) {
+        if (sizeBytes >= minSizeBytes) {
           results.push({
             name: item.name,
             path: fullPath,
-            sizeMB,
+            sizeMB: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
             sizeBytes,
             fileCount,
             isDir: item.isDirectory()
@@ -574,11 +592,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       results.sort((a, b) => b.sizeBytes - a.sizeBytes);
 
       const totalSize = results.reduce((sum, r) => sum + r.sizeBytes, 0);
-      const visualWidth = Math.max(20, width - 15);
+
+      // Fixed (non-bar) columns in each item row: "│ " + icon + " " + name(30) + " " + bar + " " + size(10) + " " + pct(3) + "% │"
+      const NAME_WIDTH = 30;
+      const SIZE_WIDTH = 10;
+      const PCT_WIDTH = 3;
+      const ICON_WIDTH = 2; // emoji occupy 2 UTF-16 code units
+      const ROW_FIXED_WIDTH = '│ '.length + ICON_WIDTH + ' '.length + NAME_WIDTH + ' '.length + ' '.length + SIZE_WIDTH + ' '.length + PCT_WIDTH + '% │'.length;
+      const totalRowWidth = Math.max(ROW_FIXED_WIDTH + 20, width);
+      const visualWidth = totalRowWidth - ROW_FIXED_WIDTH;
+      const borderWidth = totalRowWidth - 2; // width between the ┌/├/└ and ┐/┤/┘ corners
 
       let output = `\n┌─ ${path.basename(dirPath)} ─┐\n`;
       output += `│ Total: ${Number((totalSize / (1024 * 1024)).toFixed(1))} MB (${results.length} items) │\n`;
-      output += `├${'─'.repeat(visualWidth + 12)}┤\n`;
+      output += `├${'─'.repeat(borderWidth)}┤\n`;
 
       for (const item of results.slice(0, 20)) {
         const pct = totalSize > 0 ? Math.round((item.sizeBytes / totalSize) * 100) : 0;
@@ -588,14 +615,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ? `${Number((item.sizeMB / 1024).toFixed(1))} GB`
           : `${item.sizeMB} MB`;
         const typeIcon = item.isDir ? '📁' : '📄';
-        output += `│ ${typeIcon} ${item.name.padEnd(30).slice(0, 30)} ${bar.padEnd(visualWidth)} ${sizeStr.padStart(10)} ${pct.toString().padStart(3)}% │\n`;
+        output += `│ ${typeIcon} ${item.name.padEnd(NAME_WIDTH).slice(0, NAME_WIDTH)} ${bar.padEnd(visualWidth)} ${sizeStr.padStart(SIZE_WIDTH)} ${pct.toString().padStart(PCT_WIDTH)}% │\n`;
       }
 
       if (results.length > 20) {
-        output += `│ ... and ${results.length - 20} more items                              │\n`;
+        const moreText = `... and ${results.length - 20} more items`;
+        output += `│ ${moreText.padEnd(borderWidth - 2)} │\n`;
       }
 
-      output += `└${'─'.repeat(visualWidth + 12)}┘\n`;
+      output += `└${'─'.repeat(borderWidth)}┘\n`;
 
       return {
         content: [{
