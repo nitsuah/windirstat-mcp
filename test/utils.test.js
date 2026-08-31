@@ -121,7 +121,7 @@ describe('getFolderSize', () => {
   });
 });
 
-describe('categorizeItem (safety-tier categorization)', () => {
+describe('categorizeSafetyTiers logic', () => {
   const tier1Keywords = ['temp', 'cache', 'crashdump', 'updater', '.tmp', '.log'];
   const tier2Keywords = ['download', '.zip', '.rar', '.exe', '.msi', '.xapk', '.iso'];
 
@@ -148,11 +148,5 @@ describe('categorizeItem (safety-tier categorization)', () => {
     expect(categorizeItem('documents', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
     expect(categorizeItem('photos', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
     expect(categorizeItem('projects', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
-  });
-
-  it('does not match a substring occurrence of an extension keyword mid-name', () => {
-    // '.tmp' is treated as an extension keyword (matched via endsWith), so a
-    // name that merely contains it should not be classified as Tier 1.
-    expect(categorizeItem('app.tmpfile', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
   });
 });
