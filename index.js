@@ -4,6 +4,7 @@ import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprot
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { matchesKeyword, getFolderSize, categorizeItem } from './lib/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -89,25 +90,6 @@ function getExpandedWindowsTempPaths() {
 }
 
 function isProtected(targetPath) {
-  // Split a normalized path string into its individual components
-  function pathComponents(p) {
-    return p.split(/[\\/]/).filter(Boolean);
-  }
-
-  function matchesKeyword(p) {
-    const lower = p.toLowerCase();
-    const components = pathComponents(lower);
-    return PROTECTED_KEYWORDS.some(kw => {
-      const kwLower = kw.toLowerCase();
-      // Multi-segment keywords (contain path separator or space) use substring match
-      if (/[\\/\s]/.test(kwLower)) {
-        return lower.includes(kwLower);
-      }
-      // Single-component keywords must match an exact path segment
-      return components.includes(kwLower);
-    });
-  }
-
   // Check if path is a Windows system path
   function isWindowsSystemPath(p) {
     const lower = p.toLowerCase();
@@ -129,17 +111,20 @@ function isProtected(targetPath) {
   try {
     const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
 
-    // Check Windows system paths first (highest protection)
-    if (isWindowsSystemPath(resolvedPath)) {
-      return true;
-    }
-
-    // Check Windows temp paths (lowest protection - safe to clean)
+    // Check Windows temp paths first (lowest protection - safe to clean).
+    // These must be checked before the broader system-path check, since
+    // configured temp paths like C:\Windows\Temp are descendants of
+    // C:\Windows and would otherwise always be caught by it first.
     if (isWindowsTempPath(resolvedPath)) {
       return false; // Explicitly NOT protected - these are safe temp paths
     }
 
-    return matchesKeyword(resolvedPath);
+    // Check Windows system paths (highest protection)
+    if (isWindowsSystemPath(resolvedPath)) {
+      return true;
+    }
+
+    return matchesKeyword(resolvedPath, PROTECTED_KEYWORDS);
   } catch (e) {
     if (e.code !== 'ENOENT') {
       return true;
@@ -148,50 +133,16 @@ function isProtected(targetPath) {
     // If path doesn't exist, fall back to basic check on normalized path
     const normalizedPath = path.resolve(targetPath).toLowerCase();
 
-    if (isWindowsSystemPath(normalizedPath)) {
-      return true;
-    }
-
     if (isWindowsTempPath(normalizedPath)) {
       return false;
     }
 
-    return matchesKeyword(normalizedPath);
-  }
-}
-
-function getFolderSize(dirPath, currentDepth = 0, maxDepth = 3) {
-  let totalSize = 0;
-  let fileCount = 0;
-  let lastModified = new Date(0);
-
-  try {
-    const items = fs.readdirSync(dirPath, { withFileTypes: true });
-    for (const item of items) {
-      const fullPath = path.join(dirPath, item.name);
-      try {
-        if (item.isDirectory()) {
-          if (currentDepth < maxDepth) {
-            const sub = getFolderSize(fullPath, currentDepth + 1, maxDepth);
-            totalSize += sub.totalSize;
-            fileCount += sub.fileCount;
-            if (sub.lastModified > lastModified) lastModified = sub.lastModified;
-          }
-        } else if (item.isFile()) {
-          const stats = fs.statSync(fullPath);
-          totalSize += stats.size;
-          fileCount++;
-          if (stats.mtime > lastModified) lastModified = stats.mtime;
-        }
-      } catch (e) {
-        // Silently skip locked files
-      }
+    if (isWindowsSystemPath(normalizedPath)) {
+      return true;
     }
-  } catch (e) {
-    // Silently skip inaccessible dirs
-  }
 
-  return { totalSize, fileCount, lastModified };
+    return matchesKeyword(normalizedPath, PROTECTED_KEYWORDS);
+  }
 }
 
 const server = new Server(
@@ -405,7 +356,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
       for (const item of items) {
         const fullPath = path.join(dirPath, item.name);
-        const lowerName = item.name.toLowerCase();
         let sizeBytes = 0;
 
         if (item.isDirectory()) {
@@ -423,27 +373,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         if (isProtected(fullPath)) {
           tier3.push({ ...info, reason: 'Protected Code/Project/System Data' });
-        } else if (
-          lowerName.includes('temp') ||
-          lowerName.includes('cache') ||
-          lowerName.includes('crashdump') ||
-          lowerName.includes('updater') ||
-          lowerName.endsWith('.tmp') ||
-          lowerName.endsWith('.log')
-        ) {
-          tier1.push({ ...info, reason: '100% Safe Cache / Temporary Files' });
-        } else if (
-          lowerName.includes('download') ||
-          lowerName.endsWith('.zip') ||
-          lowerName.endsWith('.rar') ||
-          lowerName.endsWith('.exe') ||
-          lowerName.endsWith('.msi') ||
-          lowerName.endsWith('.xapk') ||
-          lowerName.endsWith('.iso')
-        ) {
-          tier2.push({ ...info, reason: 'Reviewable Media / Downloads / Installers' });
         } else {
-          tier2.push({ ...info, reason: 'User Data / Unclassified' });
+          const { tier, reason } = categorizeItem(item.name, TIER1_KEYWORDS, TIER2_KEYWORDS);
+          if (tier === 1) {
+            tier1.push({ ...info, reason });
+          } else {
+            tier2.push({ ...info, reason });
+          }
         }
       }
 
@@ -529,16 +465,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
     if (name === 'visualize_directory') {
       const dirPath = args.path;
-      const maxDepth = args.maxDepth || 3;
-      const width = args.width || 80;
-      const minSizeMB = args.minSizeMB || 10;
+      const visualization = config.visualization ?? {};
+      const maxDepth = args.maxDepth ?? visualization.defaultMaxDepth ?? 3;
+      const width = args.width ?? visualization.defaultWidth ?? 80;
+      const minSizeMB = args.minSizeMB ?? visualization.defaultMinSizeMB ?? 10;
+
+      if (!Number.isFinite(maxDepth) || maxDepth < 0 || maxDepth > 20) {
+        return { content: [{ type: 'text', text: 'Error: maxDepth must be a finite number between 0 and 20.' }] };
+      }
+      if (!Number.isFinite(width) || width < 40 || width > 300) {
+        return { content: [{ type: 'text', text: 'Error: width must be a finite number between 40 and 300.' }] };
+      }
+      if (!Number.isFinite(minSizeMB) || minSizeMB < 0) {
+        return { content: [{ type: 'text', text: 'Error: minSizeMB must be a finite number >= 0.' }] };
+      }
 
       if (!fs.existsSync(dirPath)) {
         return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
       }
+      if (!fs.statSync(dirPath).isDirectory()) {
+        return { content: [{ type: 'text', text: `Not a directory: ${dirPath}` }] };
+      }
 
-      const items = fs.readdirSync(dirPath, { withFileTypes: true });
+      let items;
+      try {
+        items = fs.readdirSync(dirPath, { withFileTypes: true });
+      } catch (e) {
+        return { content: [{ type: 'text', text: `Error reading directory: ${e.message}` }] };
+      }
+
       const results = [];
+      const minSizeBytes = minSizeMB * 1024 * 1024;
 
       for (const item of items) {
         const fullPath = path.join(dirPath, item.name);
@@ -557,13 +514,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           } catch (e) {}
         }
 
-        const sizeMB = Number((sizeBytes / (1024 * 1024)).toFixed(2));
-
-        if (sizeMB >= minSizeMB) {
+        if (sizeBytes >= minSizeBytes) {
           results.push({
             name: item.name,
             path: fullPath,
-            sizeMB,
+            sizeMB: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
             sizeBytes,
             fileCount,
             isDir: item.isDirectory()
@@ -574,11 +529,20 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       results.sort((a, b) => b.sizeBytes - a.sizeBytes);
 
       const totalSize = results.reduce((sum, r) => sum + r.sizeBytes, 0);
-      const visualWidth = Math.max(20, width - 15);
+
+      // Fixed (non-bar) columns in each item row: "│ " + icon + " " + name(30) + " " + bar + " " + size(10) + " " + pct(3) + "% │"
+      const NAME_WIDTH = 30;
+      const SIZE_WIDTH = 10;
+      const PCT_WIDTH = 3;
+      const ICON_WIDTH = 2; // emoji occupy 2 UTF-16 code units
+      const ROW_FIXED_WIDTH = '│ '.length + ICON_WIDTH + ' '.length + NAME_WIDTH + ' '.length + ' '.length + SIZE_WIDTH + ' '.length + PCT_WIDTH + '% │'.length;
+      const totalRowWidth = Math.max(ROW_FIXED_WIDTH + 20, width);
+      const visualWidth = totalRowWidth - ROW_FIXED_WIDTH;
+      const borderWidth = totalRowWidth - 2; // width between the ┌/├/└ and ┐/┤/┘ corners
 
       let output = `\n┌─ ${path.basename(dirPath)} ─┐\n`;
       output += `│ Total: ${Number((totalSize / (1024 * 1024)).toFixed(1))} MB (${results.length} items) │\n`;
-      output += `├${'─'.repeat(visualWidth + 12)}┤\n`;
+      output += `├${'─'.repeat(borderWidth)}┤\n`;
 
       for (const item of results.slice(0, 20)) {
         const pct = totalSize > 0 ? Math.round((item.sizeBytes / totalSize) * 100) : 0;
@@ -588,14 +552,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           ? `${Number((item.sizeMB / 1024).toFixed(1))} GB`
           : `${item.sizeMB} MB`;
         const typeIcon = item.isDir ? '📁' : '📄';
-        output += `│ ${typeIcon} ${item.name.padEnd(30).slice(0, 30)} ${bar.padEnd(visualWidth)} ${sizeStr.padStart(10)} ${pct.toString().padStart(3)}% │\n`;
+        output += `│ ${typeIcon} ${item.name.padEnd(NAME_WIDTH).slice(0, NAME_WIDTH)} ${bar.padEnd(visualWidth)} ${sizeStr.padStart(SIZE_WIDTH)} ${pct.toString().padStart(PCT_WIDTH)}% │\n`;
       }
 
       if (results.length > 20) {
-        output += `│ ... and ${results.length - 20} more items                              │\n`;
+        const moreText = `... and ${results.length - 20} more items`;
+        output += `│ ${moreText.padEnd(borderWidth - 2)} │\n`;
       }
 
-      output += `└${'─'.repeat(visualWidth + 12)}┘\n`;
+      output += `└${'─'.repeat(borderWidth)}┘\n`;
 
       return {
         content: [{

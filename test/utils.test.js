@@ -1,12 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { pathComponents, matchesKeyword, getFolderSize, categorizeItem } from '../lib/utils.js';
 
 describe('pathComponents', () => {
-  function pathComponents(p) {
-    return p.split(/[\\/]/).filter(Boolean);
-  }
-
   it('splits Windows paths correctly', () => {
     expect(pathComponents('C:\\Users\\test\\folder')).toEqual(['C:', 'Users', 'test', 'folder']);
   });
@@ -40,87 +37,37 @@ describe('matchesKeyword', () => {
     '.idea'
   ];
 
-  function pathComponents(p) {
-    return p.split(/[\\/]/).filter(Boolean);
-  }
-
-  function matchesKeyword(p) {
-    const lower = p.toLowerCase();
-    const components = pathComponents(lower);
-    return PROTECTED_KEYWORDS.some(kw => {
-      const kwLower = kw.toLowerCase();
-      if (/[\\/\s]/.test(kwLower)) {
-        return lower.includes(kwLower);
-      }
-      return components.includes(kwLower);
-    });
-  }
-
   it('matches exact single-component keywords', () => {
-    expect(matchesKeyword('C:\\project\\node_modules\\pkg')).toBe(true);
-    expect(matchesKeyword('C:\\project\\.git\\config')).toBe(true);
-    expect(matchesKeyword('C:\\project\\.vscode\\settings.json')).toBe(true);
-    expect(matchesKeyword('C:\\project\\.idea\\workspace.xml')).toBe(true);
+    expect(matchesKeyword('C:\\project\\node_modules\\pkg', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\project\\.git\\config', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\project\\.vscode\\settings.json', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\project\\.idea\\workspace.xml', PROTECTED_KEYWORDS)).toBe(true);
   });
 
   it('matches multi-segment keywords with path separators', () => {
-    expect(matchesKeyword('C:\\users\\downloads\\apk\\file.apk')).toBe(true);
-    expect(matchesKeyword('C:\\users\\documents\\backup\\old')).toBe(true);
+    expect(matchesKeyword('C:\\users\\downloads\\apk\\file.apk', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\users\\documents\\backup\\old', PROTECTED_KEYWORDS)).toBe(true);
   });
 
   it('matches multi-segment keywords with spaces', () => {
-    expect(matchesKeyword('C:\\my code project\\src')).toBe(true);
-    expect(matchesKeyword('C:\\program files\\app')).toBe(true);
+    expect(matchesKeyword('C:\\my code project\\src', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\program files\\app', PROTECTED_KEYWORDS)).toBe(true);
   });
 
   it('does NOT match substrings of single-component keywords', () => {
-    expect(matchesKeyword('C:\\project\\node\\src')).toBe(false);
-    expect(matchesKeyword('C:\\project\\git\\src')).toBe(false);
-    expect(matchesKeyword('C:\\project\\vscode\\src')).toBe(false);
+    expect(matchesKeyword('C:\\project\\node\\src', PROTECTED_KEYWORDS)).toBe(false);
+    expect(matchesKeyword('C:\\project\\git\\src', PROTECTED_KEYWORDS)).toBe(false);
+    expect(matchesKeyword('C:\\project\\vscode\\src', PROTECTED_KEYWORDS)).toBe(false);
   });
 
   it('matches system paths', () => {
-    expect(matchesKeyword('C:\\Windows\\System32\\drivers')).toBe(true);
-    expect(matchesKeyword('C:\\Program Files\\App')).toBe(true);
-    expect(matchesKeyword('C:\\Boot\\BCD')).toBe(true);
+    expect(matchesKeyword('C:\\Windows\\System32\\drivers', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\Program Files\\App', PROTECTED_KEYWORDS)).toBe(true);
+    expect(matchesKeyword('C:\\Boot\\BCD', PROTECTED_KEYWORDS)).toBe(true);
   });
 });
 
 describe('getFolderSize', () => {
-  function getFolderSize(dirPath, currentDepth = 0, maxDepth = 3) {
-    let totalSize = 0;
-    let fileCount = 0;
-    let lastModified = new Date(0);
-
-    try {
-      const items = fs.readdirSync(dirPath, { withFileTypes: true });
-      for (const item of items) {
-        const fullPath = path.join(dirPath, item.name);
-        try {
-          if (item.isDirectory()) {
-            if (currentDepth < maxDepth) {
-              const sub = getFolderSize(fullPath, currentDepth + 1, maxDepth);
-              totalSize += sub.totalSize;
-              fileCount += sub.fileCount;
-              if (sub.lastModified > lastModified) lastModified = sub.lastModified;
-            }
-          } else if (item.isFile()) {
-            const stats = fs.statSync(fullPath);
-            totalSize += stats.size;
-            fileCount++;
-            if (stats.mtime > lastModified) lastModified = stats.mtime;
-          }
-        } catch (e) {
-          // Silently skip locked files
-        }
-      }
-    } catch (e) {
-      // Silently skip inaccessible dirs
-    }
-
-    return { totalSize, fileCount, lastModified };
-  }
-
   it('calculates size of files in directory', () => {
     const testDir = fs.mkdtempSync(path.join(process.cwd(), 'test-'));
 
@@ -174,44 +121,38 @@ describe('getFolderSize', () => {
   });
 });
 
-describe('categorizeSafetyTiers logic', () => {
+describe('categorizeItem (safety-tier categorization)', () => {
   const tier1Keywords = ['temp', 'cache', 'crashdump', 'updater', '.tmp', '.log'];
   const tier2Keywords = ['download', '.zip', '.rar', '.exe', '.msi', '.xapk', '.iso'];
 
-  function categorizeItem(name, fullPath) {
-    const lowerName = name.toLowerCase();
-
-    if (tier1Keywords.some(kw => lowerName.includes(kw) || lowerName.endsWith(kw))) {
-      return { tier: 1, reason: '100% Safe Cache / Temporary Files' };
-    }
-    if (tier2Keywords.some(kw => lowerName.includes(kw) || lowerName.endsWith(kw))) {
-      return { tier: 2, reason: 'Reviewable Media / Downloads / Installers' };
-    }
-    return { tier: 2, reason: 'User Data / Unclassified' };
-  }
-
   it('categorizes temp/cache as Tier 1', () => {
-    expect(categorizeItem('temp', 'C:\\temp')).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
-    expect(categorizeItem('cache', 'C:\\cache')).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
-    expect(categorizeItem('crashdump', 'C:\\crashdump')).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
-    expect(categorizeItem('updater', 'C:\\updater')).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
-    expect(categorizeItem('file.tmp', 'C:\\file.tmp')).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
-    expect(categorizeItem('app.log', 'C:\\app.log')).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
+    expect(categorizeItem('temp', tier1Keywords, tier2Keywords)).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
+    expect(categorizeItem('cache', tier1Keywords, tier2Keywords)).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
+    expect(categorizeItem('crashdump', tier1Keywords, tier2Keywords)).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
+    expect(categorizeItem('updater', tier1Keywords, tier2Keywords)).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
+    expect(categorizeItem('file.tmp', tier1Keywords, tier2Keywords)).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
+    expect(categorizeItem('app.log', tier1Keywords, tier2Keywords)).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
   });
 
   it('categorizes downloads/installers as Tier 2', () => {
-    expect(categorizeItem('downloads', 'C:\\downloads')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
-    expect(categorizeItem('file.zip', 'C:\\file.zip')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
-    expect(categorizeItem('file.rar', 'C:\\file.rar')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
-    expect(categorizeItem('setup.exe', 'C:\\setup.exe')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
-    expect(categorizeItem('install.msi', 'C:\\install.msi')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
-    expect(categorizeItem('game.xapk', 'C:\\game.xapk')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
-    expect(categorizeItem('disk.iso', 'C:\\disk.iso')).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('downloads', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('file.zip', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('file.rar', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('setup.exe', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('install.msi', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('game.xapk', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('disk.iso', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
   });
 
   it('categorizes unknown as Tier 2 (User Data)', () => {
-    expect(categorizeItem('documents', 'C:\\documents')).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
-    expect(categorizeItem('photos', 'C:\\photos')).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
-    expect(categorizeItem('projects', 'C:\\projects')).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+    expect(categorizeItem('documents', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+    expect(categorizeItem('photos', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+    expect(categorizeItem('projects', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+  });
+
+  it('does not match a substring occurrence of an extension keyword mid-name', () => {
+    // '.tmp' is treated as an extension keyword (matched via endsWith), so a
+    // name that merely contains it should not be classified as Tier 1.
+    expect(categorizeItem('app.tmpfile', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
   });
 });

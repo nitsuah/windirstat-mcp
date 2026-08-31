@@ -12,6 +12,9 @@ Model Context Protocol (MCP) Server for real-time Windows storage analysis, deep
    - Categorizes files/folders into **Tier 1 (100% Safe Cache/Temp)**, **Tier 2 (Reviewable Downloads/Media)**, and **Tier 3 (Protected Code/Projects)**.
 4. **`clean_safe_targets`**
    - Cleans temporary caches and specified paths with built-in protection guards preventing accidental deletion of project repositories.
+5. **`visualize_directory`**
+   - Renders a WinDirStat-style ASCII treemap of a directory's top-level contents in the terminal, with proportional bars sized by disk usage.
+   - Inputs: `path` (required, directory to visualize), `maxDepth` (recursion depth for subfolder sizing, default `3`, 0-20), `width` (terminal width for the chart, default `80`, 40-300), `minSizeMB` (minimum size in MB for an item to be shown, default `10`, >= 0).
 
 ---
 
