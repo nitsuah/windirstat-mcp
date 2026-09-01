@@ -8,7 +8,7 @@
     "start": "node index.js",
     "start:docker": "node mcp-server.js",
     "docker:build": "docker build -t windirstat-mcp .",
-    "docker:run": "docker run -i --rm --name windirstat-mcp-server -v ${PWD}:/app -v C:/:/host-c:ro windirstat-mcp",
+    "docker:run": "node -e \"const { spawnSync } = require('node:child_process'); const cwd = process.cwd(); const result = spawnSync('docker', ['run', '-i', '--name', 'windirstat-mcp-server', '-v', `${cwd}:/app`, '-v', 'C:/:/host-c:ro', 'windirstat-mcp'], { stdio: 'inherit' }); process.exit(result.status ?? 1);\"",
     "docker:stop": "docker stop windirstat-mcp-server --time=5 || true",
     "docker:clean": "docker rm -f windirstat-mcp-server 2>/dev/null || true && docker rmi windirstat-mcp 2>/dev/null || true",
     "test": "vitest run",

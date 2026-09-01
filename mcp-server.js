@@ -4,7 +4,7 @@
  * Handles container lifecycle: reuse, start, stop, cleanup
  */
 
-import { spawn, execSync } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
@@ -20,40 +20,54 @@ function log(...args) {
   console.error(`[mcp-manager]`, ...args);
 }
 
-function runCmd(cmd, opts = {}) {
+function runCmd(cmd, args = [], opts = {}) {
   try {
-    return execSync(cmd, { encoding: 'utf8', stdio: 'pipe', ...opts }).trim();
+    const result = spawnSync(cmd, args, { encoding: 'utf8', stdio: 'pipe', shell: false, ...opts });
+    if (result.status !== 0) {
+      if (result.stdout) return result.stdout.trim();
+      if (result.stderr) return result.stderr.trim();
+      throw new Error(`Command failed: ${cmd} ${args.join(' ')}`);
+    }
+    return result.stdout ? result.stdout.trim() : '';
   } catch (e) {
-    if (e.status !== 0 && e.stdout) return e.stdout.trim();
-    if (e.status !== 0 && e.stderr) return e.stderr.trim();
+    if (e.stdout) return e.stdout.trim();
+    if (e.stderr) return e.stderr.trim();
     throw e;
   }
 }
 
 function containerExists() {
-  try {
-    runCmd(`docker ps -a --format '{{.Names}}' | grep -w ${CONTAINER_NAME}`);
-    return true;
-  } catch {
-    return false;
-  }
+  const names = runCmd('docker', ['ps', '-a', '--format', '{{.Names}}'])
+    .split(/\r?\n/)
+    .filter(Boolean);
+  return names.includes(CONTAINER_NAME);
 }
 
 function containerRunning() {
-  try {
-    runCmd(`docker ps --format '{{.Names}}' | grep -w ${CONTAINER_NAME}`);
-    return true;
-  } catch {
-    return false;
-  }
+  const names = runCmd('docker', ['ps', '--format', '{{.Names}}'])
+    .split(/\r?\n/)
+    .filter(Boolean);
+  return names.includes(CONTAINER_NAME);
 }
 
 function buildImage() {
   log('Building Docker image...');
-  runCmd(`docker build -t ${IMAGE_NAME} ${PROJECT_DIR}`);
+  runCmd('docker', ['build', '-t', IMAGE_NAME, PROJECT_DIR]);
+}
+
+function setupSignalHandlers() {
+  ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(sig => {
+    process.once(sig, () => {
+      log(`Received ${sig}, stopping container...`);
+      stopContainer();
+      process.exit(0);
+    });
+  });
 }
 
 function startContainer() {
+  setupSignalHandlers();
+
   if (containerRunning()) {
     log('Container already running, reusing');
     return attachToContainer();
@@ -61,15 +75,15 @@ function startContainer() {
 
   if (containerExists()) {
     log('Starting existing container...');
-    runCmd(`docker start ${CONTAINER_NAME}`);
+    runCmd('docker', ['start', CONTAINER_NAME]);
     return attachToContainer();
   }
 
   log('Creating new container...');
   buildImage();
-  
+
   const dockerArgs = [
-    'run', '-i', '--rm',
+    'run', '-i',
     '--name', CONTAINER_NAME,
     '-v', `${PROJECT_DIR}:/app`,
     '-v', `C:/:/host-c:ro`,
@@ -96,7 +110,6 @@ function startContainer() {
     process.exit(code || 0);
   });
 
-  // Forward stdin to container
   process.stdin.on('data', (data) => {
     if (containerProcess && !containerProcess.killed) {
       containerProcess.stdin.write(data);
@@ -104,21 +117,12 @@ function startContainer() {
     }
   });
 
-  // Handle signals
-  ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(sig => {
-    process.on(sig, () => {
-      log(`Received ${sig}, stopping container...`);
-      stopContainer();
-      process.exit(0);
-    });
-  });
-
   resetIdleTimer();
 }
 
 function attachToContainer() {
   log('Attaching to container...');
-  containerProcess = spawn('docker', ['exec', '-i', CONTAINER_NAME, 'node', 'index.js'], {
+  containerProcess = spawn('docker', ['attach', CONTAINER_NAME], {
     stdio: ['pipe', 'pipe', 'pipe']
   });
 
@@ -155,7 +159,7 @@ function stopContainer() {
   }
   // Don't remove - let Docker --rm handle it, or keep for reuse
   try {
-    runCmd(`docker stop ${CONTAINER_NAME} --time=5`);
+    runCmd('docker', ['stop', CONTAINER_NAME, '--time=5']);
   } catch {}
 }
 
