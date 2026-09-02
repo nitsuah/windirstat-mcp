@@ -10,7 +10,8 @@ import path from 'path';
 
 const IMAGE_NAME = 'windirstat-mcp';
 const CONTAINER_NAME = 'windirstat-mcp-server';
-const PROJECT_DIR = path.resolve(process.cwd());
+// Docker's -v spec expects forward slashes even on Windows
+const PROJECT_DIR = path.resolve(process.cwd()).replace(/\\/g, '/');
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 let containerProcess = null;

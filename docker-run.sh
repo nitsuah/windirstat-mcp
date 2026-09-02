@@ -8,11 +8,10 @@ CONTAINER_NAME="windirstat-mcp-server"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
 
-# Build image if needed
-if ! docker image inspect "$IMAGE_NAME" >/dev/null 2>&1; then
-    echo "Building image..."
-    docker build -t "$IMAGE_NAME" "$PROJECT_DIR"
-fi
+# Build (or rebuild) the image; Docker's layer cache keeps this fast when
+# nothing has changed, and it keeps the image from silently going stale.
+echo "Building image..."
+docker build -t "$IMAGE_NAME" "$PROJECT_DIR"
 
 # Check for existing container
 if docker ps -a --format '{{.Names}}' | grep -q "^${CONTAINER_NAME}$"; then
