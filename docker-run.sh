@@ -7,6 +7,9 @@ IMAGE_NAME="windirstat-mcp"
 CONTAINER_NAME="windirstat-mcp-server"
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="${PROJECT_DIR:-$SCRIPT_DIR}"
+# Host directory exposed read-only at /host-c for scanning. Defaults to the
+# whole C: drive; narrow it via SCAN_ROOT to limit the container's read access.
+SCAN_ROOT="${SCAN_ROOT:-C:/}"
 
 # Build (or rebuild) the image; Docker's layer cache keeps this fast when
 # nothing has changed, and it keeps the image from silently going stale.
@@ -29,6 +32,6 @@ else
     exec docker run -i \
         --name "$CONTAINER_NAME" \
         -v "$PROJECT_DIR:/app" \
-        -v "C:/:/host-c:ro" \
+        -v "$SCAN_ROOT:/host-c:ro" \
         "$IMAGE_NAME"
 fi

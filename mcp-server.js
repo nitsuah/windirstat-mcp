@@ -12,6 +12,10 @@ const IMAGE_NAME = 'windirstat-mcp';
 const CONTAINER_NAME = 'windirstat-mcp-server';
 // Docker's -v spec expects forward slashes even on Windows
 const PROJECT_DIR = path.resolve(process.cwd()).replace(/\\/g, '/');
+// Host directory exposed read-only at /host-c for scanning. Defaults to the
+// whole C: drive (this tool's purpose is disk-wide analysis), but can be
+// narrowed via SCAN_ROOT to limit the container's read access.
+const SCAN_ROOT = (process.env.SCAN_ROOT || 'C:/').replace(/\\/g, '/');
 const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 let containerProcess = null;
@@ -87,7 +91,7 @@ function startContainer() {
     'run', '-i',
     '--name', CONTAINER_NAME,
     '-v', `${PROJECT_DIR}:/app`,
-    '-v', `C:/:/host-c:ro`,
+    '-v', `${SCAN_ROOT}:/host-c:ro`,
     IMAGE_NAME
   ];
 
