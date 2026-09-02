@@ -156,15 +156,22 @@ describe('categorizeItem (safety-tier categorization)', () => {
     expect(categorizeItem('app.tmpfile', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
   });
 
-  it('does not match a tier2 extension keyword that is not a trailing suffix', () => {
-    // Tier2 extension keywords (starting with '.') are matched via exact
-    // name or endsWith, so ".exe" appearing mid-name shouldn't count.
-    expect(categorizeItem('archive.exe.bak', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
-  });
-
   it('ignores empty tier2 keywords instead of matching every filename', () => {
     // An empty string is a substring of everything, so blank keywords
     // (e.g. from an unset config value) must be filtered out before matching.
     expect(categorizeItem('documents', tier1Keywords, ['', ...tier2Keywords])).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+  });
+
+  it('still matches tier2 extension keywords that are not a trailing suffix', () => {
+    // Tier2 keeps substring matching, unlike tier1, so ".zip" is found even
+    // when it's not the very end of the name.
+    expect(categorizeItem('archive.zip.old', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+  });
+
+  it('matches keywords case-insensitively regardless of config casing', () => {
+    // Keywords themselves may come from config with mixed case; they must be
+    // normalized the same way the filename is before comparing.
+    expect(categorizeItem('archive.zip', ['TEMP', 'CACHE'], ['.ZIP'])).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+    expect(categorizeItem('Temp', ['TEMP', 'CACHE'], ['.ZIP'])).toEqual({ tier: 1, reason: '100% Safe Cache / Temporary Files' });
   });
 });
