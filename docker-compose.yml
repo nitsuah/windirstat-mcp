@@ -1,0 +1,17 @@
+services:
+  windirstat-mcp:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: windirstat-mcp-server
+    stdin_open: true
+    volumes:
+      - .:/app
+      # Host directory exposed read-only at /host-c for scanning. Defaults to
+      # the whole C: drive; set SCAN_ROOT to narrow the container's read access.
+      - ${SCAN_ROOT:-C:/}:/host-c:ro
+    restart: "no"
+
+networks:
+  default:
+    name: windirstat-mcp-net

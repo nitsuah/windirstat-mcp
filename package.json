@@ -6,6 +6,11 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
+    "start:docker": "node mcp-server.js",
+    "docker:build": "docker build -t windirstat-mcp .",
+    "docker:run": "node mcp-server.js",
+    "docker:stop": "docker stop windirstat-mcp-server --time=5 || true",
+    "docker:clean": "docker rm -f windirstat-mcp-server 2>/dev/null || true && docker rmi windirstat-mcp 2>/dev/null || true",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
