@@ -155,4 +155,10 @@ describe('categorizeItem (safety-tier categorization)', () => {
     // name that merely contains it should not be classified as Tier 1.
     expect(categorizeItem('app.tmpfile', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
   });
+
+  it('still matches tier2 extension keywords that are not a trailing suffix', () => {
+    // Tier2 keeps substring matching, unlike tier1, so ".zip" is found even
+    // when it's not the very end of the name.
+    expect(categorizeItem('archive.zip.old', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'Reviewable Media / Downloads / Installers' });
+  });
 });
