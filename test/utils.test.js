@@ -155,4 +155,16 @@ describe('categorizeItem (safety-tier categorization)', () => {
     // name that merely contains it should not be classified as Tier 1.
     expect(categorizeItem('app.tmpfile', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
   });
+
+  it('does not match a tier2 extension keyword that is not a trailing suffix', () => {
+    // Tier2 extension keywords (starting with '.') are matched via exact
+    // name or endsWith, so ".exe" appearing mid-name shouldn't count.
+    expect(categorizeItem('archive.exe.bak', tier1Keywords, tier2Keywords)).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+  });
+
+  it('ignores empty tier2 keywords instead of matching every filename', () => {
+    // An empty string is a substring of everything, so blank keywords
+    // (e.g. from an unset config value) must be filtered out before matching.
+    expect(categorizeItem('documents', tier1Keywords, ['', ...tier2Keywords])).toEqual({ tier: 2, reason: 'User Data / Unclassified' });
+  });
 });

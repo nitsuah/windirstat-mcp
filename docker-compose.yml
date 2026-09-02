@@ -13,6 +13,3 @@ services:
 networks:
   default:
     name: windirstat-mcp-net
-networks:
-  default:
-    name: windirstat-mcp-net
