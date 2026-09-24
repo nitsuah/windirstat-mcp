@@ -9,4 +9,6 @@ COPY index.js .
 COPY lib/ ./lib/
 COPY config.default.json .
 
+EXPOSE 3939
+
 ENTRYPOINT ["node", "index.js"]

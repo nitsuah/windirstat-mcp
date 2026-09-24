@@ -1,183 +1,254 @@
 #!/usr/bin/env node
 /**
- * windirstat-mcp Docker Manager
- * Handles container lifecycle: reuse, start, stop, cleanup
+ * windirstat-mcp shared-container bridge (stdio <-> HTTP)
+ *
+ * MCP clients that only speak stdio (or that should auto-start the server)
+ * launch this script instead of `docker run`. It:
+ *   1. Makes sure exactly one `windirstat-mcp-server` container is running
+ *      (reusing it if another client already started it; building the image
+ *      only if it is missing).
+ *   2. Opens its own MCP session on the container's Streamable HTTP endpoint
+ *      and relays JSON-RPC between stdio and HTTP.
+ *   3. Sends a heartbeat so its session stays alive, and closes the session
+ *      when the client goes away.
+ *
+ * The container stops itself once no sessions remain for MCP_IDLE_TIMEOUT_MS,
+ * so N clients share one container and zero clients means zero containers.
+ *
+ * Zero dependencies on purpose: runs with plain `node` on the host.
+ *
+ * Env:
+ *   WINDIRSTAT_MCP_URL   Connect to this endpoint and skip Docker management
+ *   MCP_PORT             Host port for the shared container (default 3939)
+ *   SCAN_ROOT            Host dir mounted read-only at /host-c (default C:/)
+ *   MCP_IDLE_TIMEOUT_MS  Container exits after this long with no sessions (default 10 min)
+ *   MCP_SESSION_TTL_MS   Container reaps sessions silent for this long (default 5 min)
  */
 
-import { spawn, spawnSync } from 'child_process';
-import fs from 'fs';
+import { spawnSync } from 'child_process';
 import path from 'path';
+import readline from 'readline';
+import { fileURLToPath } from 'url';
 
 const IMAGE_NAME = 'windirstat-mcp';
 const CONTAINER_NAME = 'windirstat-mcp-server';
+const PROJECT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const PORT = Number(process.env.MCP_PORT) || 3939;
+const MANAGE_DOCKER = !process.env.WINDIRSTAT_MCP_URL;
+const MCP_URL = process.env.WINDIRSTAT_MCP_URL || `http://127.0.0.1:${PORT}/mcp`;
+const HEALTH_URL = new URL('/health', MCP_URL).href;
 // Docker's -v spec expects forward slashes even on Windows
-const PROJECT_DIR = path.resolve(process.cwd()).replace(/\\/g, '/');
-// Host directory exposed read-only at /host-c for scanning. Defaults to the
-// whole C: drive (this tool's purpose is disk-wide analysis), but can be
-// narrowed via SCAN_ROOT to limit the container's read access.
 const SCAN_ROOT = (process.env.SCAN_ROOT || 'C:/').replace(/\\/g, '/');
-const IDLE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+const IDLE_TIMEOUT_MS = Number(process.env.MCP_IDLE_TIMEOUT_MS) || 10 * 60 * 1000;
+const SESSION_TTL_MS = Number(process.env.MCP_SESSION_TTL_MS) || 5 * 60 * 1000;
+const HEARTBEAT_MS = Math.min(60 * 1000, SESSION_TTL_MS / 3);
+const STARTUP_TIMEOUT_MS = 60 * 1000;
 
-let containerProcess = null;
-let idleTimer = null;
+let sessionId = null;
+let protocolVersion = null;
+let initMessage = null; // replayed to transparently recover a lost session
+let recovering = null;
+let pingCounter = 0;
 
 function log(...args) {
-  console.error(`[mcp-manager]`, ...args);
+  console.error('[mcp-bridge]', ...args);
 }
 
-function runCmd(cmd, args = [], opts = {}) {
+function docker(args) {
+  return spawnSync('docker', args, { encoding: 'utf8', stdio: 'pipe', shell: false });
+}
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+async function healthy() {
   try {
-    const result = spawnSync(cmd, args, { encoding: 'utf8', stdio: 'pipe', shell: false, ...opts });
-    if (result.status !== 0) {
-      if (result.stdout) return result.stdout.trim();
-      if (result.stderr) return result.stderr.trim();
-      throw new Error(`Command failed: ${cmd} ${args.join(' ')}`);
-    }
-    return result.stdout ? result.stdout.trim() : '';
-  } catch (e) {
-    if (e.stdout) return e.stdout.trim();
-    if (e.stderr) return e.stderr.trim();
-    throw e;
+    const res = await fetch(HEALTH_URL, { signal: AbortSignal.timeout(1000) });
+    return res.ok;
+  } catch {
+    return false;
   }
-}
-
-function containerExists() {
-  const names = runCmd('docker', ['ps', '-a', '--format', '{{.Names}}'])
-    .split(/\r?\n/)
-    .filter(Boolean);
-  return names.includes(CONTAINER_NAME);
-}
-
-function containerRunning() {
-  const names = runCmd('docker', ['ps', '--format', '{{.Names}}'])
-    .split(/\r?\n/)
-    .filter(Boolean);
-  return names.includes(CONTAINER_NAME);
-}
-
-function buildImage() {
-  log('Building Docker image...');
-  runCmd('docker', ['build', '-t', IMAGE_NAME, PROJECT_DIR]);
-}
-
-function setupSignalHandlers() {
-  ['SIGINT', 'SIGTERM', 'SIGHUP'].forEach(sig => {
-    process.once(sig, () => {
-      log(`Received ${sig}, stopping container...`);
-      stopContainer();
-      process.exit(0);
-    });
-  });
 }
 
 function startContainer() {
-  setupSignalHandlers();
-
-  if (containerRunning()) {
-    log('Container already running, reusing');
-    return attachToContainer();
+  if (docker(['image', 'inspect', IMAGE_NAME]).status !== 0) {
+    log(`Image ${IMAGE_NAME} not found, building...`);
+    const build = docker(['build', '-t', IMAGE_NAME, PROJECT_DIR]);
+    if (build.status !== 0) throw new Error(`docker build failed: ${build.stderr}`);
   }
 
-  if (containerExists()) {
-    log('Starting existing container...');
-    runCmd('docker', ['start', CONTAINER_NAME]);
-    return attachToContainer();
-  }
-
-  log('Creating new container...');
-  buildImage();
-
-  const dockerArgs = [
-    'run', '-i',
+  log(`Starting shared container ${CONTAINER_NAME}...`);
+  const run = docker([
+    'run', '-d', '--rm', '--init',
     '--name', CONTAINER_NAME,
-    '-v', `${PROJECT_DIR}:/app`,
+    '-p', `127.0.0.1:${PORT}:3939`,
     '-v', `${SCAN_ROOT}:/host-c:ro`,
+    '-e', 'MCP_TRANSPORT=http',
+    '-e', 'MCP_HOST=0.0.0.0',
+    '-e', `MCP_IDLE_TIMEOUT_MS=${IDLE_TIMEOUT_MS}`,
+    '-e', `MCP_SESSION_TTL_MS=${SESSION_TTL_MS}`,
     IMAGE_NAME
-  ];
-
-  containerProcess = spawn('docker', dockerArgs, {
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
-
-  containerProcess.stdout.on('data', (data) => {
-    process.stdout.write(data);
-    resetIdleTimer();
-  });
-
-  containerProcess.stderr.on('data', (data) => {
-    process.stderr.write(data);
-  });
-
-  containerProcess.on('exit', (code) => {
-    log(`Container exited with code ${code}`);
-    containerProcess = null;
-    if (idleTimer) clearTimeout(idleTimer);
-    process.exit(code || 0);
-  });
-
-  process.stdin.on('data', (data) => {
-    if (containerProcess && !containerProcess.killed) {
-      containerProcess.stdin.write(data);
-      resetIdleTimer();
-    }
-  });
-
-  resetIdleTimer();
-}
-
-function attachToContainer() {
-  log('Attaching to container...');
-  containerProcess = spawn('docker', ['attach', CONTAINER_NAME], {
-    stdio: ['pipe', 'pipe', 'pipe']
-  });
-
-  containerProcess.stdout.on('data', (data) => {
-    process.stdout.write(data);
-    resetIdleTimer();
-  });
-
-  containerProcess.stderr.on('data', (data) => {
-    process.stderr.write(data);
-  });
-
-  containerProcess.on('exit', (code) => {
-    log(`Container process exited with code ${code}`);
-    containerProcess = null;
-    if (idleTimer) clearTimeout(idleTimer);
-    process.exit(code || 0);
-  });
-
-  process.stdin.on('data', (data) => {
-    if (containerProcess && !containerProcess.killed) {
-      containerProcess.stdin.write(data);
-      resetIdleTimer();
-    }
-  });
-
-  resetIdleTimer();
-}
-
-function stopContainer() {
-  if (containerProcess && !containerProcess.killed) {
-    containerProcess.kill('SIGTERM');
-    containerProcess = null;
+  ]);
+  // A name conflict means another client won the race (or the old container
+  // is still shutting down); either way keep polling until healthy.
+  if (run.status !== 0 && !/already in use/i.test(run.stderr)) {
+    log(`docker run failed: ${run.stderr.trim()}`);
   }
-  // Don't remove - let Docker --rm handle it, or keep for reuse
+}
+
+async function ensureServer() {
+  if (await healthy()) return;
+  if (!MANAGE_DOCKER) throw new Error(`MCP server at ${MCP_URL} is not reachable`);
+
+  const deadline = Date.now() + STARTUP_TIMEOUT_MS;
+  while (Date.now() < deadline) {
+    const running = docker(['ps', '-q', '--filter', `name=^${CONTAINER_NAME}$`]).stdout.trim();
+    if (!running) startContainer();
+    await sleep(500);
+    if (await healthy()) return;
+  }
+  throw new Error(`Timed out waiting for ${CONTAINER_NAME} on port ${PORT}`);
+}
+
+function writeMessage(msg) {
+  process.stdout.write(JSON.stringify(msg) + '\n');
+}
+
+function parseSse(text) {
+  return text.split(/\r?\n\r?\n/)
+    .map(event => event.split(/\r?\n/)
+      .filter(line => line.startsWith('data:'))
+      .map(line => line.slice(5).trimStart())
+      .join('\n'))
+    .filter(Boolean)
+    .map(data => JSON.parse(data));
+}
+
+class SessionLostError extends Error {}
+
+async function post(msg) {
+  const headers = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json, text/event-stream'
+  };
+  if (sessionId) headers['Mcp-Session-Id'] = sessionId;
+  if (protocolVersion) headers['Mcp-Protocol-Version'] = protocolVersion;
+
+  const res = await fetch(MCP_URL, { method: 'POST', headers, body: JSON.stringify(msg) });
+  if (res.status === 404 && sessionId) throw new SessionLostError();
+
+  const newSessionId = res.headers.get('mcp-session-id');
+  if (newSessionId) sessionId = newSessionId;
+
+  const text = await res.text();
+  if (!text) return [];
+  const contentType = res.headers.get('content-type') || '';
+  const payload = contentType.includes('text/event-stream') ? parseSse(text) : JSON.parse(text);
+  return Array.isArray(payload) ? payload : [payload];
+}
+
+// The container restarted (idle timeout, crash, manual stop): bring it back
+// and replay the client's original handshake so the client never notices.
+function recoverSession() {
+  recovering ??= (async () => {
+    log('Session lost, re-establishing...');
+    sessionId = null;
+    await ensureServer();
+    await post({ ...initMessage, id: 'bridge-reinit' });
+    await post({ jsonrpc: '2.0', method: 'notifications/initialized' });
+  })().finally(() => { recovering = null; });
+  return recovering;
+}
+
+async function forward(msg) {
+  if (recovering) await recovering;
   try {
-    runCmd('docker', ['stop', CONTAINER_NAME, '--time=5']);
-  } catch {}
+    return await post(msg);
+  } catch (err) {
+    // Only recover from a lost session (404) or an unreachable container
+    // (fetch rejects with TypeError); anything else is a real error.
+    const lost = err instanceof SessionLostError || err instanceof TypeError;
+    if (!lost || !initMessage || msg === initMessage) throw err;
+    await recoverSession();
+    return post(msg);
+  }
 }
 
-function resetIdleTimer() {
-  if (idleTimer) clearTimeout(idleTimer);
-  idleTimer = setTimeout(() => {
-    log(`Idle timeout (${IDLE_TIMEOUT_MS/60000}min) reached, stopping container...`);
-    stopContainer();
-    // Exit manager - container will be cleaned up by --rm or kept for reuse
-    process.exit(0);
-  }, IDLE_TIMEOUT_MS);
+async function handleMessage(msg) {
+  const isRequest = msg.id !== undefined && msg.method !== undefined;
+  try {
+    if (msg.method === 'initialize') {
+      await ensureServer();
+      initMessage = msg;
+    }
+    const replies = await forward(msg);
+    for (const reply of replies) {
+      if (msg.method === 'initialize' && reply.result?.protocolVersion) {
+        protocolVersion = reply.result.protocolVersion;
+      }
+      writeMessage(reply);
+    }
+  } catch (err) {
+    log(`Failed to relay ${msg.method ?? 'message'}: ${err.message}`);
+    if (isRequest) {
+      writeMessage({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: `windirstat-mcp bridge: ${err.message}` } });
+    }
+  }
 }
 
-// Main
-log('Starting windirstat-mcp Docker Manager');
-startContainer();
+async function heartbeat() {
+  if (!sessionId || recovering) return;
+  try {
+    await forward({ jsonrpc: '2.0', id: `bridge-ping-${++pingCounter}`, method: 'ping' });
+  } catch (err) {
+    log(`Heartbeat failed: ${err.message}`);
+  }
+}
+
+let shuttingDown = false;
+async function shutdown(code = 0) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  if (sessionId) {
+    try {
+      await fetch(MCP_URL, {
+        method: 'DELETE',
+        headers: { 'Mcp-Session-Id': sessionId },
+        signal: AbortSignal.timeout(2000)
+      });
+    } catch {
+      // Server already gone; its session TTL covers this case anyway.
+    }
+  }
+  process.exit(code);
+}
+
+function main() {
+  setInterval(heartbeat, HEARTBEAT_MS).unref();
+
+  const rl = readline.createInterface({ input: process.stdin });
+  const pending = new Set();
+  rl.on('line', line => {
+    if (!line.trim()) return;
+    let msg;
+    try {
+      msg = JSON.parse(line);
+    } catch {
+      log('Ignoring non-JSON input line');
+      return;
+    }
+    const p = handleMessage(msg);
+    pending.add(p);
+    p.finally(() => pending.delete(p));
+  });
+  // Client closed our stdin: flush in-flight replies, then end the session.
+  rl.on('close', async () => {
+    await Promise.allSettled([...pending]);
+    shutdown(0);
+  });
+
+  for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+    process.once(sig, () => shutdown(0));
+  }
+}
+
+main();
