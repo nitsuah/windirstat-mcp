@@ -6,6 +6,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { matchesKeyword, getFolderSize, categorizeItem } from './lib/utils.js';
 import { startHttpServer } from './lib/http-server.js';
+import { createPathMapper, mapResultToHost } from './lib/path-map.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -20,6 +21,13 @@ function loadConfig() {
 }
 
 const config = loadConfig();
+
+// In Docker mode HOST_ROOT (e.g. C:/) is mounted at HOST_MOUNT, so clients can
+// keep using Windows paths. Unset when running natively (identity mapping).
+const pathMapper = createPathMapper({
+  hostRoot: process.env.HOST_ROOT,
+  mount: process.env.HOST_MOUNT || '/host-c'
+});
 const PROTECTED_KEYWORDS = config.protectedKeywords || [
   'code project',
   'freelance',
@@ -110,7 +118,7 @@ function isProtected(targetPath) {
   }
 
   try {
-    const resolvedPath = fs.realpathSync(path.resolve(targetPath)).toLowerCase();
+    const resolvedPath = pathMapper.toHost(fs.realpathSync(path.resolve(targetPath))).toLowerCase();
 
     // Check Windows temp paths first (lowest protection - safe to clean).
     // These must be checked before the broader system-path check, since
@@ -132,7 +140,7 @@ function isProtected(targetPath) {
     }
 
     // If path doesn't exist, fall back to basic check on normalized path
-    const normalizedPath = path.resolve(targetPath).toLowerCase();
+    const normalizedPath = pathMapper.toHost(path.resolve(targetPath)).toLowerCase();
 
     if (isWindowsTempPath(normalizedPath)) {
       return false;
@@ -234,8 +242,14 @@ function createServer() {
     };
   });
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
-    const { name, arguments: args } = request.params;
+  server.setRequestHandler(CallToolRequestSchema, async (request) =>
+    mapResultToHost(await callTool(request), pathMapper));
+
+  async function callTool(request) {
+    const { name } = request.params;
+    const args = { ...request.params.arguments };
+    if (args.path !== undefined) args.path = pathMapper.toContainer(args.path);
+    if (Array.isArray(args.targets)) args.targets = args.targets.map(pathMapper.toContainer);
 
     try {
       if (name === 'scan_directory') {
@@ -580,7 +594,7 @@ function createServer() {
         isError: true
       };
     }
-  });
+  }
 
   return server;
 }

@@ -48,6 +48,7 @@ let sessionId = null;
 let protocolVersion = null;
 let initMessage = null; // replayed to transparently recover a lost session
 let recovering = null;
+let handshake = null; // in-flight or finished initialize round trip
 let pingCounter = 0;
 
 function log(...args) {
@@ -86,6 +87,8 @@ function startContainer() {
     '--name', CONTAINER_NAME,
     '-p', `127.0.0.1:${PORT}:3939`,
     '-v', `${SCAN_ROOT}:/host-c:ro`,
+    // Lets the server translate C:\... paths to and from /host-c
+    '-e', `HOST_ROOT=${SCAN_ROOT}`,
     '-e', 'MCP_TRANSPORT=http',
     '-e', 'MCP_HOST=0.0.0.0',
     '-e', `MCP_IDLE_TIMEOUT_MS=${IDLE_TIMEOUT_MS}`,
@@ -198,11 +201,19 @@ async function forward(msg) {
 async function handleMessage(msg) {
   const isRequest = msg.id !== undefined && msg.method !== undefined;
   try {
+    let replies;
     if (msg.method === 'initialize') {
-      await ensureServer();
       initMessage = msg;
+      handshake = (async () => {
+        await ensureServer();
+        return forward(msg);
+      })();
+      replies = await handshake;
+    } else {
+      // Anything pipelined behind initialize needs the session it creates.
+      if (handshake) await handshake.catch(() => {});
+      replies = await forward(msg);
     }
-    const replies = await forward(msg);
     for (const reply of replies) {
       if (msg.method === 'initialize' && reply.result?.protocolVersion) {
         protocolVersion = reply.result.protocolVersion;
