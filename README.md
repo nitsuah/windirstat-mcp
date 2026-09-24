@@ -53,3 +53,37 @@ Add to your MCP settings configuration:
   }
 }
 ```
+
+### 3. Docker: one shared instance for every client
+
+Plain `docker run --rm -i windirstat-mcp` in an MCP config starts a **new container for every client session** (each Claude Code session, each VS Code window, ...). To share one container instead, run the server in HTTP mode. Each client still gets its own MCP session inside the shared container.
+
+**Option A: auto start/stop (recommended).** Point every client at the bridge script. It starts the shared `windirstat-mcp-server` container if nothing is running yet, or reuses the one that is. The container removes itself after 10 minutes with no connected clients. Requires `node` on the host (no npm install needed).
+
+```json
+{
+  "mcpServers": {
+    "windirstat-mcp": {
+      "command": "node",
+      "args": ["C:/path/to/windirstat-mcp/mcp-server.js"]
+    }
+  }
+}
+```
+
+**Option B: always on.** Run `npm run docker:up` (docker compose, `restart: unless-stopped`) and connect clients over HTTP:
+
+```json
+{ "mcpServers": { "windirstat-mcp": { "type": "http", "url": "http://127.0.0.1:3939/mcp" } } }
+```
+
+Both options use the same container name and port, so they never run side by side. The host directory `SCAN_ROOT` (default `C:/`) is mounted read-only at `/host-c`, so scan paths such as `/host-c/Users/<you>`.
+
+| Env var | Default | Meaning |
+|---|---|---|
+| `MCP_TRANSPORT` | `stdio` | `http` serves Streamable HTTP at `/mcp` (same as `--http`) |
+| `MCP_PORT` | `3939` | HTTP port |
+| `MCP_IDLE_TIMEOUT_MS` | `0` (bridge: 10 min) | Exit once no sessions remain for this long; `0` = never |
+| `MCP_SESSION_TTL_MS` | `0` (bridge: 5 min) | Drop sessions with no traffic for this long; the bridge heartbeats to stay alive |
+| `SCAN_ROOT` | `C:/` | Host directory mounted read-only at `/host-c` |
+| `WINDIRSTAT_MCP_URL` | | Bridge only: connect to this URL and skip Docker management |

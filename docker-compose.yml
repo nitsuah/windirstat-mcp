@@ -1,17 +1,21 @@
+# Always-on shared server. Every MCP client connects to the same container at
+# http://127.0.0.1:3939/mcp (each client still gets its own MCP session).
+# Alternative: point clients at `node mcp-server.js`, which starts this same
+# container on demand and lets it stop itself when idle.
 services:
   windirstat-mcp:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
+    image: windirstat-mcp
+    # Same name the bridge uses, so the two never run side by side.
     container_name: windirstat-mcp-server
-    stdin_open: true
+    init: true
+    environment:
+      MCP_TRANSPORT: http
+      MCP_HOST: 0.0.0.0
+    ports:
+      - "127.0.0.1:${MCP_PORT:-3939}:3939"
     volumes:
-      - .:/app
       # Host directory exposed read-only at /host-c for scanning. Defaults to
       # the whole C: drive; set SCAN_ROOT to narrow the container's read access.
       - ${SCAN_ROOT:-C:/}:/host-c:ro
-    restart: "no"
-
-networks:
-  default:
-    name: windirstat-mcp-net
+    restart: unless-stopped
