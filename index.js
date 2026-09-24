@@ -98,6 +98,18 @@ function getExpandedWindowsTempPaths() {
   return WINDOWS_TEMP_PATHS.map(expandWindowsEnvVars).filter(Boolean);
 }
 
+function errorResult(text) {
+  return { content: [{ type: 'text', text }], isError: true };
+}
+
+// Returns an error result unless dirPath is an existing directory.
+function checkDirectory(dirPath) {
+  if (typeof dirPath !== 'string' || !dirPath) return errorResult('Error: path is required.');
+  if (!fs.existsSync(dirPath)) return errorResult(`Path not found: ${dirPath}`);
+  if (!fs.statSync(dirPath).isDirectory()) return errorResult(`Not a directory: ${dirPath}`);
+  return null;
+}
+
 function isProtected(targetPath) {
   // Check if path is a Windows system path
   function isWindowsSystemPath(p) {
@@ -254,12 +266,17 @@ function createServer() {
     try {
       if (name === 'scan_directory') {
         const dirPath = args.path;
-        const maxDepth = args.maxDepth || 2;
-        const minSizeMB = args.minSizeMB || 50;
+        const maxDepth = args.maxDepth ?? 2;
+        const minSizeMB = args.minSizeMB ?? 50;
 
-        if (!fs.existsSync(dirPath)) {
-          return { content: [{ type: 'text', text: `Directory not found: ${dirPath}` }] };
+        if (!Number.isFinite(maxDepth) || maxDepth < 0 || maxDepth > 20) {
+          return errorResult('Error: maxDepth must be a finite number between 0 and 20.');
         }
+        if (!Number.isFinite(minSizeMB) || minSizeMB < 0) {
+          return errorResult('Error: minSizeMB must be a finite number >= 0.');
+        }
+        const dirError = checkDirectory(dirPath);
+        if (dirError) return dirError;
 
         const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const results = [];
@@ -293,6 +310,7 @@ function createServer() {
               path: fullPath,
               sizeMB,
               sizeGB,
+              sizeBytes,
               fileCount,
               lastModified: lastMod.toISOString().split('T')[0],
               isDir: item.isDirectory()
@@ -300,7 +318,7 @@ function createServer() {
           }
         }
 
-        results.sort((a, b) => b.sizeMB - a.sizeMB);
+        results.sort((a, b) => b.sizeBytes - a.sizeBytes);
 
         return {
           content: [{
@@ -312,11 +330,13 @@ function createServer() {
 
       if (name === 'get_largest_items') {
         const dirPath = args.path;
-        const limit = args.limit || 15;
+        const limit = args.limit ?? 15;
 
-        if (!fs.existsSync(dirPath)) {
-          return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
+        if (!Number.isInteger(limit) || limit < 1) {
+          return errorResult('Error: limit must be a positive integer.');
         }
+        const dirError = checkDirectory(dirPath);
+        if (dirError) return dirError;
 
         const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const results = [];
@@ -343,12 +363,13 @@ function createServer() {
             path: fullPath,
             sizeMB: Number((sizeBytes / (1024 * 1024)).toFixed(2)),
             sizeGB: Number((sizeBytes / (1024 * 1024 * 1024)).toFixed(2)),
+            sizeBytes,
             fileCount,
             type: item.isDirectory() ? 'directory' : 'file'
           });
         }
 
-        results.sort((a, b) => b.sizeMB - a.sizeMB);
+        results.sort((a, b) => b.sizeBytes - a.sizeBytes);
         const topItems = results.slice(0, limit);
 
         return {
@@ -361,10 +382,8 @@ function createServer() {
 
       if (name === 'categorize_safety_tiers') {
         const dirPath = args.path;
-
-        if (!fs.existsSync(dirPath)) {
-          return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
-        }
+        const dirError = checkDirectory(dirPath);
+        if (dirError) return dirError;
 
         const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const tier1 = [];
@@ -411,8 +430,11 @@ function createServer() {
       if (name === 'clean_safe_targets') {
         const { targets, confirmAction, reportOnly } = args;
 
+        if (!Array.isArray(targets) || !targets.every(t => typeof t === 'string')) {
+          return errorResult('Error: targets must be an array of path strings.');
+        }
         if (!confirmAction) {
-          return { content: [{ type: 'text', text: 'Error: confirmAction must be true to proceed with deletion.' }] };
+          return errorResult('Error: confirmAction must be true to proceed with deletion.');
         }
 
         const results = [];
@@ -488,27 +510,23 @@ function createServer() {
         const minSizeMB = args.minSizeMB ?? visualization.defaultMinSizeMB ?? 10;
 
         if (!Number.isFinite(maxDepth) || maxDepth < 0 || maxDepth > 20) {
-          return { content: [{ type: 'text', text: 'Error: maxDepth must be a finite number between 0 and 20.' }] };
+          return errorResult('Error: maxDepth must be a finite number between 0 and 20.');
         }
         if (!Number.isFinite(width) || width < 40 || width > 300) {
-          return { content: [{ type: 'text', text: 'Error: width must be a finite number between 40 and 300.' }] };
+          return errorResult('Error: width must be a finite number between 40 and 300.');
         }
         if (!Number.isFinite(minSizeMB) || minSizeMB < 0) {
-          return { content: [{ type: 'text', text: 'Error: minSizeMB must be a finite number >= 0.' }] };
+          return errorResult('Error: minSizeMB must be a finite number >= 0.');
         }
 
-        if (!fs.existsSync(dirPath)) {
-          return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
-        }
-        if (!fs.statSync(dirPath).isDirectory()) {
-          return { content: [{ type: 'text', text: `Not a directory: ${dirPath}` }] };
-        }
+        const dirError = checkDirectory(dirPath);
+        if (dirError) return dirError;
 
         let items;
         try {
           items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         } catch (e) {
-          return { content: [{ type: 'text', text: `Error reading directory: ${e.message}` }] };
+          return errorResult(`Error reading directory: ${e.message}`);
         }
 
         const results = [];

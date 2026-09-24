@@ -30,7 +30,7 @@ Add the following entry to your `%APPDATA%\Claude\claude_desktop_config.json`:
     "windirstat": {
       "command": "node",
       "args": [
-        "C:\\Users\\Hariz\\windirstat-mcp\\index.js"
+        "C:\\path\\to\\windirstat-mcp\\index.js"
       ]
     }
   }
@@ -47,7 +47,7 @@ Add to your MCP settings configuration:
     "windirstat": {
       "command": "node",
       "args": [
-        "C:/Users/Hariz/windirstat-mcp/index.js"
+        "C:/path/to/windirstat-mcp/index.js"
       ]
     }
   }
