@@ -247,7 +247,7 @@ function createServer() {
           return { content: [{ type: 'text', text: `Directory not found: ${dirPath}` }] };
         }
 
-        const items = fs.readdirSync(dirPath, { withFileTypes: true });
+        const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const results = [];
 
         for (const item of items) {
@@ -257,13 +257,13 @@ function createServer() {
           let lastMod = new Date(0);
 
           if (item.isDirectory()) {
-            const res = getFolderSize(fullPath, 0, maxDepth);
+            const res = await getFolderSize(fullPath, 0, maxDepth);
             sizeBytes = res.totalSize;
             fileCount = res.fileCount;
             lastMod = res.lastModified;
           } else if (item.isFile()) {
             try {
-              const stats = fs.statSync(fullPath);
+              const stats = await fs.promises.stat(fullPath);
               sizeBytes = stats.size;
               fileCount = 1;
               lastMod = stats.mtime;
@@ -304,7 +304,7 @@ function createServer() {
           return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
         }
 
-        const items = fs.readdirSync(dirPath, { withFileTypes: true });
+        const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const results = [];
 
         for (const item of items) {
@@ -313,12 +313,12 @@ function createServer() {
           let fileCount = 0;
 
           if (item.isDirectory()) {
-            const res = getFolderSize(fullPath, 0, 3);
+            const res = await getFolderSize(fullPath, 0, 3);
             sizeBytes = res.totalSize;
             fileCount = res.fileCount;
           } else if (item.isFile()) {
             try {
-              const stats = fs.statSync(fullPath);
+              const stats = await fs.promises.stat(fullPath);
               sizeBytes = stats.size;
               fileCount = 1;
             } catch (e) {}
@@ -352,7 +352,7 @@ function createServer() {
           return { content: [{ type: 'text', text: `Path not found: ${dirPath}` }] };
         }
 
-        const items = fs.readdirSync(dirPath, { withFileTypes: true });
+        const items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         const tier1 = [];
         const tier2 = [];
         const tier3 = [];
@@ -362,9 +362,9 @@ function createServer() {
           let sizeBytes = 0;
 
           if (item.isDirectory()) {
-            sizeBytes = getFolderSize(fullPath, 0, 2).totalSize;
+            sizeBytes = (await getFolderSize(fullPath, 0, 2)).totalSize;
           } else {
-            try { sizeBytes = fs.statSync(fullPath).size; } catch(e){}
+            try { sizeBytes = (await fs.promises.stat(fullPath)).size; } catch(e){}
           }
 
           const info = {
@@ -433,7 +433,7 @@ function createServer() {
             let sizeBytes = 0;
 
             if (stats.isDirectory()) {
-              sizeBytes = getFolderSize(deletePath, 0, 5).totalSize;
+              sizeBytes = (await getFolderSize(deletePath, 0, 5)).totalSize;
               if (!reportOnly) {
                 fs.rmSync(deletePath, { recursive: true, force: true });
               }
@@ -492,7 +492,7 @@ function createServer() {
 
         let items;
         try {
-          items = fs.readdirSync(dirPath, { withFileTypes: true });
+          items = await fs.promises.readdir(dirPath, { withFileTypes: true });
         } catch (e) {
           return { content: [{ type: 'text', text: `Error reading directory: ${e.message}` }] };
         }
@@ -506,12 +506,12 @@ function createServer() {
           let fileCount = 0;
 
           if (item.isDirectory()) {
-            const res = getFolderSize(fullPath, 0, maxDepth);
+            const res = await getFolderSize(fullPath, 0, maxDepth);
             sizeBytes = res.totalSize;
             fileCount = res.fileCount;
           } else if (item.isFile()) {
             try {
-              const stats = fs.statSync(fullPath);
+              const stats = await fs.promises.stat(fullPath);
               sizeBytes = stats.size;
               fileCount = 1;
             } catch (e) {}

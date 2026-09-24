@@ -68,7 +68,7 @@ describe('matchesKeyword', () => {
 });
 
 describe('getFolderSize', () => {
-  it('calculates size of files in directory', () => {
+  it('calculates size of files in directory', async () => {
     const testDir = fs.mkdtempSync(path.join(process.cwd(), 'test-'));
 
     fs.writeFileSync(path.join(testDir, 'file1.txt'), 'a'.repeat(1000));
@@ -78,7 +78,7 @@ describe('getFolderSize', () => {
     fs.mkdirSync(subDir);
     fs.writeFileSync(path.join(subDir, 'file3.txt'), 'c'.repeat(3000));
 
-    const result = getFolderSize(testDir, 0, 3);
+    const result = await getFolderSize(testDir, 0, 3);
 
     expect(result.totalSize).toBe(6000);
     expect(result.fileCount).toBe(3);
@@ -86,7 +86,7 @@ describe('getFolderSize', () => {
     fs.rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('respects maxDepth', () => {
+  it('respects maxDepth', async () => {
     const testDir = fs.mkdtempSync(path.join(process.cwd(), 'test-'));
 
     const level1 = path.join(testDir, 'level1');
@@ -101,7 +101,7 @@ describe('getFolderSize', () => {
     fs.mkdirSync(level3);
     fs.writeFileSync(path.join(level3, 'file3.txt'), 'c'.repeat(3000));
 
-    const result = getFolderSize(testDir, 0, 2);
+    const result = await getFolderSize(testDir, 0, 2);
 
     expect(result.totalSize).toBe(3000);
     expect(result.fileCount).toBe(2);
@@ -109,10 +109,10 @@ describe('getFolderSize', () => {
     fs.rmSync(testDir, { recursive: true, force: true });
   });
 
-  it('handles empty directories', () => {
+  it('handles empty directories', async () => {
     const testDir = fs.mkdtempSync(path.join(process.cwd(), 'test-'));
 
-    const result = getFolderSize(testDir, 0, 3);
+    const result = await getFolderSize(testDir, 0, 3);
 
     expect(result.totalSize).toBe(0);
     expect(result.fileCount).toBe(0);

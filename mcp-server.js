@@ -55,7 +55,11 @@ function log(...args) {
 }
 
 function docker(args) {
-  return spawnSync('docker', args, { encoding: 'utf8', stdio: 'pipe', shell: false });
+  const result = spawnSync('docker', args, { encoding: 'utf8', stdio: 'pipe', shell: false });
+  if (result.error) {
+    throw new Error(`docker ${args[0]} failed to run: ${result.error.message}`);
+  }
+  return result;
 }
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -135,6 +139,17 @@ async function post(msg) {
 
   const res = await fetch(MCP_URL, { method: 'POST', headers, body: JSON.stringify(msg) });
   if (res.status === 404 && sessionId) throw new SessionLostError();
+  if (!res.ok) {
+    // Error bodies carry `id: null`, which the client can't match to its
+    // request; throw so handleMessage answers with the original id.
+    let detail = `HTTP ${res.status}`;
+    try {
+      detail = JSON.parse(await res.text()).error?.message ?? detail;
+    } catch {
+      // Non-JSON error body; keep the status code.
+    }
+    throw new Error(detail);
+  }
 
   const newSessionId = res.headers.get('mcp-session-id');
   if (newSessionId) sessionId = newSessionId;
@@ -161,6 +176,7 @@ function recoverSession() {
 
 async function forward(msg) {
   if (recovering) await recovering;
+  const usedSessionId = sessionId;
   try {
     return await post(msg);
   } catch (err) {
@@ -168,7 +184,13 @@ async function forward(msg) {
     // (fetch rejects with TypeError); anything else is a real error.
     const lost = err instanceof SessionLostError || err instanceof TypeError;
     if (!lost || !initMessage || msg === initMessage) throw err;
-    await recoverSession();
+    // A stale failure from a session that was already replaced must not
+    // trigger a second recovery (which would orphan the replacement).
+    if (sessionId === usedSessionId) {
+      await recoverSession();
+    } else if (recovering) {
+      await recovering;
+    }
     return post(msg);
   }
 }
