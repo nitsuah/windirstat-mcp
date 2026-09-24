@@ -12,6 +12,8 @@ services:
     environment:
       MCP_TRANSPORT: http
       MCP_HOST: 0.0.0.0
+      # Lets the server translate C:\... paths to and from /host-c
+      HOST_ROOT: ${SCAN_ROOT:-C:/}
     ports:
       - "127.0.0.1:${MCP_PORT:-3939}:3939"
     volumes:

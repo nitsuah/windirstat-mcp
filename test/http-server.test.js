@@ -141,6 +141,21 @@ describe('mcp-server.js bridge', () => {
     return { child, send, reply, exited };
   }
 
+  it('holds messages pipelined behind initialize until the session exists', async () => {
+    const { base } = await start();
+    const bridge = startBridge(base);
+
+    bridge.send(initialize(1));
+    bridge.send({ jsonrpc: '2.0', method: 'notifications/initialized' });
+    bridge.send({ jsonrpc: '2.0', id: 2, method: 'tools/list' });
+
+    expect((await bridge.reply(2)).result.tools).toHaveLength(1);
+    expect((await health(base)).sessions).toBe(1);
+
+    bridge.child.stdin.end();
+    expect(await bridge.exited).toBe(0);
+  }, 15000);
+
   it('relays stdio, recovers a lost session, and closes its session on exit', async () => {
     const { srv, base } = await start();
     const bridge = startBridge(base);

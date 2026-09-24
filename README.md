@@ -77,7 +77,7 @@ Plain `docker run --rm -i windirstat-mcp` in an MCP config starts a **new contai
 { "mcpServers": { "windirstat-mcp": { "type": "http", "url": "http://127.0.0.1:3939/mcp" } } }
 ```
 
-Both options use the same container name and port, so they never run side by side. The host directory `SCAN_ROOT` (default `C:/`) is mounted read-only at `/host-c`, so scan paths such as `/host-c/Users/<you>`.
+Both options use the same container name and port, so they never run side by side. The host directory `SCAN_ROOT` (default `C:/`) is mounted read-only at `/host-c`. Clients keep using normal Windows paths (`C:\Users\<you>`): the server maps them into the mount and maps result paths back. Paths outside `SCAN_ROOT` are not visible to the container.
 
 | Env var | Default | Meaning |
 |---|---|---|
@@ -86,4 +86,5 @@ Both options use the same container name and port, so they never run side by sid
 | `MCP_IDLE_TIMEOUT_MS` | `0` (bridge: 10 min) | Exit once no sessions remain for this long; `0` = never |
 | `MCP_SESSION_TTL_MS` | `0` (bridge: 5 min) | Drop sessions with no traffic for this long; the bridge heartbeats to stay alive |
 | `SCAN_ROOT` | `C:/` | Host directory mounted read-only at `/host-c` |
+| `HOST_ROOT` / `HOST_MOUNT` | unset / `/host-c` | Server side: translate Windows paths under `HOST_ROOT` to and from `HOST_MOUNT` (set automatically by the bridge and compose) |
 | `WINDIRSTAT_MCP_URL` | | Bridge only: connect to this URL and skip Docker management |
