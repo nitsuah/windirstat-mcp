@@ -88,3 +88,7 @@ Both options use the same container name and port, so they never run side by sid
 | `SCAN_ROOT` | `C:/` | Host directory mounted read-only at `/host-c` |
 | `HOST_ROOT` / `HOST_MOUNT` | unset / `/host-c` | Server side: translate Windows paths under `HOST_ROOT` to and from `HOST_MOUNT` (set automatically by the bridge and compose) |
 | `WINDIRSTAT_MCP_URL` | | Bridge only: connect to this URL and skip Docker management |
+
+## Docs
+
+[Features](docs/FEATURES.md) · [Roadmap](docs/ROADMAP.md) · [Tasks](docs/TASKS.md) · [Changelog](docs/CHANGELOG.md)
