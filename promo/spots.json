@@ -1,0 +1,80 @@
+{
+  "product": "windirstat-mcp",
+  "live": null,
+  "page": null,
+  "pagesDir": null,
+  "frontend": false,
+  "features": [
+    {
+      "id": "scan-directory",
+      "title": "scan_directory",
+      "category": "Tools",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "get-largest-items",
+      "title": "get_largest_items",
+      "category": "Tools",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "categorize-safety-tiers",
+      "title": "categorize_safety_tiers",
+      "category": "Tools",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "clean-safe-targets",
+      "title": "clean_safe_targets",
+      "category": "Tools",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "visualize-directory",
+      "title": "visualize_directory",
+      "category": "Tools",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "protected-path-guard",
+      "title": "Protected-path guard",
+      "category": "Safety",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "shared-docker-container",
+      "title": "Shared Docker container",
+      "category": "Transports and deployment",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    },
+    {
+      "id": "windows-path-mapping",
+      "title": "Windows path mapping",
+      "category": "Transports and deployment",
+      "screenshots": [],
+      "spots": [],
+      "visual": "none"
+    }
+  ],
+  "spots": [],
+  "reels": [],
+  "brand": {
+    "source": null,
+    "derived": [],
+    "manual": []
+  }
+}
