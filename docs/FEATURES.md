@@ -9,13 +9,13 @@ An MCP server for Windows disk analysis and safe cleanup. Every item below is ch
 - **`scan_directory`** - Scans a directory and returns each entry with its size in MB/GB, file count and last-modified date, largest first. Inputs: `path`, `maxDepth` (default 2, 0-20), `minSizeMB` (default 50).
 - **`get_largest_items`** - Ranks the top N largest files and subfolders under a path. Inputs: `path`, `limit` (default 15, positive integer).
 - **`categorize_safety_tiers`** - Sorts the entries of a directory into Tier 1 (safe cache/temp), Tier 2 (reviewable downloads/media) and Tier 3 (protected code, projects and system data).
-- **`clean_safe_targets`** - Deletes the given files or folders. Requires `confirmAction: true`, skips protected paths, and `reportOnly: true` simulates the run (`WOULD_DELETE` / `WOULD_SKIP_PROTECTED`) without deleting.
+- **`clean_safe_targets`** - Deletes the given files or folders. Requires `confirmAction: true`, skips protected paths, and `reportOnly: true` simulates the run (`WOULD_DELETE` / `WOULD_SKIP_PROTECTED`) without deleting. The protected check applies to each selected path only: a selected folder is removed recursively, including any `.git` or `node_modules` inside it. In the Docker deployments the host is mounted read-only, so host files cannot be deleted there; host cleanup needs a native (`node index.js`) run.
 - **`visualize_directory`** - Draws a WinDirStat-style ASCII chart of a directory's top-level contents with bars proportional to size. Inputs: `path`, `maxDepth` (default 3, 0-20), `width` (default 80, 40-300), `minSizeMB` (default 10).
 
 ## Safety
 
-- **Protected-path guard** - Paths are resolved to their canonical real path before the check and again before deletion, then matched against a Windows system-path list (`C:\Windows`, `C:\Program Files`, ...) and protected keywords (`.git`, `node_modules`, `system32`, ...). Keywords match whole path components, never substrings.
-- **Known temp locations stay cleanable** - `%TEMP%`, `%TMP%`, INetCache, Prefetch and the Windows temp folders are checked first, so they are not blocked by the broader `C:\Windows` rule.
+- **Protected-path guard** - Each requested path is resolved to its canonical real path (symlinks followed), and that resolved path is checked and then used for the deletion; there is no later re-check. It is matched against a Windows system-path list (`C:\Windows`, `C:\Program Files`, ...) and protected keywords (`.git`, `node_modules`, `system32`, ...). Keywords match whole path components, never substrings.
+- **Known temp locations stay cleanable** - `%TEMP%`, `%TMP%`, INetCache, Prefetch and the Windows temp folders are checked first, so they are not blocked by the broader `C:\Windows` rule. The exception covers everything under those folders, so protected keywords are not applied inside them (for example `C:\Windows\Temp\.git` is cleanable).
 - **Explicit confirmation** - Deletion never runs without `confirmAction: true`; invalid arguments return an `isError` result instead of throwing.
 - **Local-only HTTP** - The HTTP transport rejects requests whose `Host` header is not `localhost`, `127.0.0.1` or `[::1]` (DNS-rebinding guard), and compose publishes the port on `127.0.0.1` only.
 
