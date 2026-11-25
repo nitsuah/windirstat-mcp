@@ -59,7 +59,7 @@ Add to your MCP settings configuration:
 The shipped defaults live in `config.default.json`. To change protected keywords, system paths or tier keywords without editing that file (or the image), point `WINDIRSTAT_MCP_CONFIG` at your own JSON file. Each top-level key it sets replaces the default for that key; keys it omits keep the defaults. A missing or invalid override file stops the server at start-up instead of silently using the defaults.
 
 ```json
-{ "protectedKeywords": ["code project", "documents\backup", "system32", ".git"] }
+{ "protectedKeywords": ["code project", "documents\\backup", "system32", ".git"] }
 ```
 
 For Docker, mount the file and set the variable: `docker run --rm -i -v C:/me/windirstat.json:/app/user.json -e WINDIRSTAT_MCP_CONFIG=/app/user.json windirstat-mcp`.
