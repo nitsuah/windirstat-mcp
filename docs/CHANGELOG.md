@@ -12,12 +12,14 @@ No version has been tagged yet (`package.json` says 1.0.0), so history below is 
 
 ### Added
 
+- `WINDIRSTAT_MCP_CONFIG`: an optional JSON file merged key by key over `config.default.json` (new `lib/config.js`, with tests), so protected keywords can be tuned without editing the shipped defaults. A missing or invalid override file is an error at start-up.
 - `docs/` standards set: FEATURES, ROADMAP, TASKS and this changelog, plus `promo/spots.json`.
 
 ## 2026-11
 
 ### Changed
 
+- `package.json`: `author` is now the maintainer, and `repository` and `homepage` are set.
 - Dependency bumps: hono, `@hono/node-server`, and the minor-and-patch group (#30-#35).
 
 ### Fixed
