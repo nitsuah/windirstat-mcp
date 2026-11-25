@@ -11,7 +11,7 @@ Five tools, the protected-path guard, HTTP/stdio transports, the shared Docker c
 ## Next
 
 - [ ] **First tagged release** (v1.0.0) with correct package metadata.
-- [ ] **Configurable protection**: a user config override so the guard can be tuned without editing the shipped defaults.
+- [x] **Configurable protection**: a user config override so the guard can be tuned without editing the shipped defaults.
 - [ ] **Maintainability**: split the single `index.js` into per-tool modules and add linting.
 
 ## Later (exploratory)

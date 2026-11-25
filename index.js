@@ -6,21 +6,14 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { matchesKeyword, getFolderSize, categorizeItem } from './lib/utils.js';
 import { startHttpServer } from './lib/http-server.js';
+import { loadConfig } from './lib/config.js';
 import { createPathMapper, mapResultToHost } from './lib/path-map.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load configuration
-function loadConfig() {
-  const configPath = path.join(__dirname, 'config.default.json');
-  if (fs.existsSync(configPath)) {
-    return JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  }
-  return {};
-}
-
-const config = loadConfig();
+// Load configuration (defaults plus optional WINDIRSTAT_MCP_CONFIG override)
+const config = loadConfig(__dirname);
 
 // In Docker mode HOST_ROOT (e.g. C:/) is mounted at HOST_MOUNT, so clients can
 // keep using Windows paths. Unset when running natively (identity mapping).

@@ -22,8 +22,8 @@ GitHub Issues are disabled on this repo, so this file is the backlog.
 
 - [ ] Tag a release. `package.json` says 1.0.0 but no git tag exists, so the changelog cannot link versions.
   - Acceptance Criteria: a `v1.0.0` tag and a changelog section for it.
-- [ ] Update `package.json` metadata: the `author` field says "Antigravity AI" and there is no `repository` or `homepage` field.
-- [ ] Allow a user config override. `loadConfig()` only reads `config.default.json` beside `index.js`, so changing protected keywords means editing the shipped file (or the image).
+- [x] Update `package.json` metadata: the `author` field says "Antigravity AI" and there is no `repository` or `homepage` field.
+- [x] Allow a user config override. `loadConfig()` only reads `config.default.json` beside `index.js`, so changing protected keywords means editing the shipped file (or the image).
   - Acceptance Criteria: an optional `WINDIRSTAT_MCP_CONFIG` path merged over the defaults, with a test and a README note.
 
 ### P3 - Exploratory

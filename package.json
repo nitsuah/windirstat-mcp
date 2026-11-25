@@ -31,6 +31,11 @@
     "storage",
     "cleanup"
   ],
-  "author": "Antigravity AI",
+  "author": "Austin J. Hardy",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/nitsuah/windirstat-mcp.git"
+  },
+  "homepage": "https://github.com/nitsuah/windirstat-mcp#readme",
   "license": "MIT"
 }
